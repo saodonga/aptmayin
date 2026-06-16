@@ -1,0 +1,67 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  USER
+  DEPT_MANAGER
+  ADMIN
+}
+
+enum JobStatus {
+  PENDING
+  PROCESSING
+  SUCCESS
+  FAILED
+}
+
+model User {
+  id            String     @id @default(cuid())
+  name          String?
+  email         String     @unique
+  emailVerified DateTime?
+  image         String?
+  role          Role       @default(USER)
+  pageQuota     Int        @default(100) // Hạn mức trang in mỗi tháng
+  pagesPrinted  Int        @default(0)   // Số trang đã in trong tháng
+  printJobs     PrintJob[]
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+}
+
+model Printer {
+  id          String     @id @default(cuid())
+  name        String     @unique // Tên đăng ký trong CUPS
+  displayName String     // Tên hiển thị thân thiện trên UI
+  connection  String     // Ví dụ: ipp://10.100.0.200/ipp/print
+  status      String     @default("IDLE") // IDLE, PRINTING, OFFLINE
+  isColor     Boolean    @default(false)
+  isDuplex    Boolean    @default(true)
+  location    String?    // Vị trí vật lý
+  printJobs   PrintJob[]
+  createdAt   DateTime   @default(now())
+}
+
+model PrintJob {
+  id          String     @id @default(cuid())
+  userId      String
+  user        User       @relation(fields: [userId], references: [id])
+  printerId   String
+  printer     Printer    @relation(fields: [printerId], references: [id])
+  fileName    String
+  fileSize    Int        // bytes
+  pageCount   Int        // Số trang của file gốc
+  copies      Int        @default(1)
+  totalPages  Int        // pageCount * copies
+  paperSize   String     @default("A4") // A4, A3, etc.
+  duplex      Boolean    @default(true) // true = in 2 mặt, false = 1 mặt
+  colorMode   String     @default("GRAY") // GRAY, COLOR
+  status      JobStatus  @default(PENDING)
+  errorLog    String?    // Chi tiết lỗi nếu thất bại
+  createdAt   DateTime   @default(now())
+}

@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  # 1. Ứng dụng Web Next.js
+  nextjs-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: printer_server_app
+    restart: always
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    volumes:
+      - temp-print-files:/app/temp
+    depends_on:
+      - cups-server
+
+  # 2. CUPS Print Server (Đầu não kết nối máy in USB và máy in mạng)
+  cups-server:
+    image: olbat/cupsd:latest
+    container_name: printer_cups_server
+    privileged: true # Cần thiết để nhận cổng USB trên máy chủ Linux Host
+    restart: always
+    ports:
+      - "631:631"
+    volumes:
+      - /var/run/dbus:/var/run/dbus  # Hỗ trợ tự động dò quét máy in
+      - /dev/bus/usb:/dev/bus/usb    # Map cổng USB máy host vào container
+    environment:
+      - ADMIN_PASSWORD=admin_secret
+
+volumes:
+  temp-print-files:
