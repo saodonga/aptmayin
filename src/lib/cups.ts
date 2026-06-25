@@ -141,13 +141,10 @@ interface IppResult {
 async function cupsRequest(
   cupsHost: string,
   path: string,
-  username: string,
-  password: string,
   packet: Buffer
 ): Promise<IppResult> {
   const [hostname, portStr] = cupsHost.split(':');
   const port = portStr ? parseInt(portStr, 10) : 631;
-  const auth = Buffer.from(`${username}:${password}`).toString('base64');
 
   return new Promise<IppResult>((resolve, reject) => {
     const opts: http.RequestOptions = {
@@ -155,7 +152,6 @@ async function cupsRequest(
       headers: {
         'Content-Type': 'application/ipp',
         'Content-Length': packet.length,
-        'Authorization': `Basic ${auth}`,
       },
     };
 
@@ -179,36 +175,15 @@ async function cupsRequest(
   });
 }
 
-// ─── Authentication Fallback ──────────────────────────────────────────────────
+// ─── Config ───────────────────────────────────────────────────────────────────
 
-function getConfig() {
-  const host     = process.env.CUPS_SERVER_HOST     || 'cups-server:631';
-  const password = process.env.CUPS_SERVER_PASSWORD || 'admin_secret';
-  const extra    = process.env.CUPS_SERVER_USER;
-  const users    = [...(extra ? [extra] : []), 'print', 'admin', 'root']
-    .filter((v, i, a) => a.indexOf(v) === i);
-  return { host, password, users };
+/** CUPS host (default: service name inside Docker network) */
+function getCupsHost(): string {
+  return process.env.CUPS_SERVER_HOST || 'cups-server:631';
 }
 
-/**
- * Try an async action with each candidate CUPS user in sequence.
- * Throws only if ALL users fail.
- */
-async function withUserFallback<T>(
-  action: (user: string, host: string, password: string) => Promise<T>
-): Promise<T> {
-  const { host, password, users } = getConfig();
-  let lastErr: any;
-  for (const user of users) {
-    try {
-      return await action(user, host, password);
-    } catch (e: any) {
-      console.error(`[CUPS] Failed with user="${user}":`, e.message ?? e);
-      lastErr = e;
-    }
-  }
-  throw lastErr ?? new Error('Tất cả tài khoản CUPS đều thất bại');
-}
+/** IPP caller name embedded in packet for CUPS audit log */
+const CUPS_CALLER = 'cups-app';
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -228,18 +203,17 @@ export async function ensureCupsPrinterQueue(name: string, connection: string): 
   const ppdName    = isIppProto ? 'everywhere' : 'raw';
 
   try {
-    await withUserFallback(async (user, host, pass) => {
-      console.log(`[CUPS] Add-Printer "${name}" user="${user}" device-uri="${connection}" ppd="${ppdName}"`);
-      const packet = buildAddPrinter(user, targetUri, connection, ppdName);
-      const res    = await cupsRequest(host, '/admin/', user, pass, packet);
-      console.log(`[CUPS] Add-Printer response: HTTP ${res.httpStatus}, IPP 0x${res.ippStatus.toString(16)}`);
-      if (res.httpStatus === 401 || res.httpStatus === 403) {
-        throw new Error(`HTTP ${res.httpStatus} - sai thông tin xác thực`);
-      }
-      if (res.ippStatus > 0x00FF) {
-        throw new Error(`IPP lỗi 0x${res.ippStatus.toString(16)}`);
-      }
-    });
+    const host = getCupsHost();
+    console.log(`[CUPS] Add-Printer "${name}" device-uri="${connection}" ppd="${ppdName}"`);
+    const packet = buildAddPrinter(CUPS_CALLER, targetUri, connection, ppdName);
+    const res    = await cupsRequest(host, '/admin/', packet);
+    console.log(`[CUPS] Add-Printer response: HTTP ${res.httpStatus}, IPP 0x${res.ippStatus.toString(16)}`);
+    if (res.httpStatus >= 400) {
+      throw new Error(`HTTP ${res.httpStatus} từ CUPS server`);
+    }
+    if (res.ippStatus > 0x00FF) {
+      throw new Error(`IPP lỗi 0x${res.ippStatus.toString(16)}`);
+    }
   } catch (err: any) {
     console.error(`[CUPS] ensureCupsPrinterQueue failed for "${name}":`, err);
     throw new Error(
@@ -260,15 +234,14 @@ export async function deleteCupsPrinterQueue(name: string): Promise<boolean> {
   const printerUri = `ipp://${cupsHost}/printers/${name}`;
 
   try {
-    await withUserFallback(async (user, host, pass) => {
-      console.log(`[CUPS] Delete-Printer "${name}" user="${user}"`);
-      const packet = buildDeletePrinter(user, printerUri);
-      const res    = await cupsRequest(host, '/admin/', user, pass, packet);
-      console.log(`[CUPS] Delete-Printer response: HTTP ${res.httpStatus}, IPP 0x${res.ippStatus.toString(16)}`);
-      if (res.httpStatus === 401 || res.httpStatus === 403) {
-        throw new Error(`HTTP ${res.httpStatus} - sai thông tin xác thực`);
-      }
-    });
+    const host = getCupsHost();
+    console.log(`[CUPS] Delete-Printer "${name}"`);
+    const packet = buildDeletePrinter(CUPS_CALLER, printerUri);
+    const res    = await cupsRequest(host, '/admin/', packet);
+    console.log(`[CUPS] Delete-Printer response: HTTP ${res.httpStatus}, IPP 0x${res.ippStatus.toString(16)}`);
+    if (res.httpStatus >= 400) {
+      throw new Error(`HTTP ${res.httpStatus} từ CUPS server`);
+    }
     return true;
   } catch (err: any) {
     console.error(`[CUPS] deleteCupsPrinterQueue failed for "${name}":`, err);
@@ -283,15 +256,14 @@ export async function deleteCupsPrinterQueue(name: string): Promise<boolean> {
 export async function cupsGetDevices(): Promise<any[]> {
   if (process.env.MOCK_PRINTING === 'true') return [];
 
-  return withUserFallback(async (user, host, pass) => {
-    console.log(`[CUPS] Get-Devices user="${user}"`);
-    const packet = buildGetDevices(user);
-    const res    = await cupsRequest(host, '/', user, pass, packet);
-    console.log(`[CUPS] Get-Devices response: HTTP ${res.httpStatus}, IPP 0x${res.ippStatus.toString(16)}`);
-    if (res.httpStatus === 401 || res.httpStatus === 403) {
-      throw new Error(`HTTP ${res.httpStatus} - sai thông tin xác thực`);
-    }
-    const tags = res.body?.['printer-attributes-tag'] ?? res.body?.['device-attributes-tag'] ?? [];
-    return Array.isArray(tags) ? tags : [tags];
-  });
+  const host = getCupsHost();
+  console.log(`[CUPS] Get-Devices`);
+  const packet = buildGetDevices(CUPS_CALLER);
+  const res    = await cupsRequest(host, '/', packet);
+  console.log(`[CUPS] Get-Devices response: HTTP ${res.httpStatus}, IPP 0x${res.ippStatus.toString(16)}`);
+  if (res.httpStatus >= 400) {
+    throw new Error(`HTTP ${res.httpStatus} từ CUPS server`);
+  }
+  const tags = res.body?.['printer-attributes-tag'] ?? res.body?.['device-attributes-tag'] ?? [];
+  return Array.isArray(tags) ? tags : [tags];
 }

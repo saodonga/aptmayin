@@ -41,3 +41,13 @@ docs/client_secret*.json
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# CUPS runtime-generated files (keep cupsd.conf, ignore everything else cups/ creates)
+cups/config/printers.conf
+cups/config/classes.conf
+cups/config/subscriptions.conf
+cups/config/ppd/
+cups/config/ssl/
+cups/config/interfaces/
+cups/spool/*
+!cups/spool/.gitkeep
