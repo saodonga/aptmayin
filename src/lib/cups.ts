@@ -99,7 +99,7 @@ export async function ensureCupsPrinterQueue(name: string, connection: string): 
     });
   } catch (error: any) {
     console.error(`[CUPS] ensureCupsPrinterQueue failed for ${name}:`, error);
-    throw new Error('Không thể tự động cấu hình máy in trên CUPS Server! Vui lòng cấu hình máy in CUPS thủ công.');
+    throw new Error(`Không thể tự động cấu hình máy in trên CUPS Server! Chi tiết lỗi: ${error.message || String(error)}`);
   }
 
   return targetConnection;
