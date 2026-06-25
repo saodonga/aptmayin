@@ -19,7 +19,13 @@ import {
   RefreshCw,
   FileText,
   Edit,
-  Trash2
+  Trash2,
+  Search,
+  Wifi,
+  WifiOff,
+  AlertCircle,
+  Activity,
+  ArrowRight
 } from 'lucide-react';
 
 interface PrintJob {
@@ -97,6 +103,23 @@ export default function DashboardPage() {
   const [newPrinterColor, setNewPrinterColor] = useState(false);
   const [newPrinterDuplex, setNewPrinterDuplex] = useState(true);
   const [editingPrinterId, setEditingPrinterId] = useState<string | null>(null);
+
+  // Printer Detection Wizard States
+  const [detectIp, setDetectIp] = useState('');
+  const [detecting, setDetecting] = useState(false);
+  const [detectResult, setDetectResult] = useState<{
+    online: boolean;
+    openPorts: number[];
+    detectedProtocol?: string;
+    recommendedConnection?: string;
+    message?: string;
+    printerInfo?: {
+      displayName: string;
+      isColor: boolean;
+      isDuplex: boolean;
+    } | null;
+  } | null>(null);
+  const [detectStep, setDetectStep] = useState<string>('');
 
   // Loading & Action states
   const [loading, setLoading] = useState(false);
@@ -336,6 +359,79 @@ export default function DashboardPage() {
     } catch (e) {
       alert('Không thể kết nối đến máy chủ!');
     }
+  };
+
+  const handleDetectPrinter = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!detectIp.trim()) return;
+
+    setDetecting(true);
+    setDetectResult(null);
+    setDetectStep('Đang khởi tạo kết nối mạng...');
+
+    try {
+      // Simulate steps for UI feedback
+      setTimeout(() => setDetectStep('Đang gửi lệnh quét cổng mạng (Ports: 9100, 631, 515, 80)...'), 600);
+      
+      const res = await fetch('/api/admin/printers/detect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip: detectIp }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setDetectResult({ online: false, openPorts: [], message: data.error || 'Lỗi kết nối từ server.' });
+        setDetectStep('Quét lỗi: Không kết nối được.');
+        return;
+      }
+
+      if (data.online) {
+        if (data.openPorts.includes(631)) {
+          setDetectStep('Phát hiện dịch vụ IPP. Đang truy vấn cấu hình chi tiết (Model, Duplex, Color)...');
+          await new Promise(r => setTimeout(r, 800));
+        }
+        setDetectResult(data);
+        setDetectStep('Quét thành công! Thiết bị đang trực tuyến.');
+      } else {
+        setDetectResult(data);
+        setDetectStep('Quét hoàn tất: Thiết bị ngoại tuyến.');
+      }
+    } catch (e) {
+      setDetectResult({ online: false, openPorts: [], message: 'Không thể kết nối tới server Next.js.' });
+      setDetectStep('Quét lỗi: Lỗi kết nối.');
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  const applyDetectConfig = () => {
+    if (!detectResult || !detectResult.online) return;
+    
+    // Auto fill fields
+    if (detectResult.printerInfo) {
+      setNewPrinterDisplayName(detectResult.printerInfo.displayName);
+      setNewPrinterColor(detectResult.printerInfo.isColor);
+      setNewPrinterDuplex(detectResult.printerInfo.isDuplex);
+      
+      // Auto generate name based on model name
+      const cleanName = detectResult.printerInfo.displayName
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/(^_|_$)/g, '');
+      setNewPrinterName(cleanName);
+    } else {
+      // Fallback auto fill
+      setNewPrinterDisplayName(`Máy in mạng ${detectIp}`);
+      setNewPrinterName(`printer_${detectIp.replace(/\./g, '_')}`);
+    }
+    
+    if (detectResult.recommendedConnection) {
+      setNewPrinterConnection(detectResult.recommendedConnection);
+    }
+    
+    alert('Đã áp dụng cấu hình tự động vào Form! Hãy đặt vị trí và kiểm tra lại trước khi đăng ký.');
   };
 
   // Action Admin: Update User Quota
@@ -1070,57 +1166,168 @@ export default function DashboardPage() {
                   </div>
                 </form>
 
-                {/* List of configuration printers */}
-                <div className="md:col-span-2 bg-slate-900 p-8 rounded-2xl border border-slate-800 shadow-xl flex flex-col h-full overflow-hidden">
-                  <div className="flex items-center gap-2 pb-4 border-b border-slate-800 mb-4">
-                    <Printer className="h-5 w-5 text-indigo-400" />
-                    <h3 className="font-bold text-white text-md">Cấu hình máy in hệ thống</h3>
-                  </div>
+                {/* Right Column: Auto-Detect Wizard & List of configured printers */}
+                <div className="md:col-span-2 space-y-6 flex flex-col h-full">
+                  {/* Auto-Detect Wizard Card */}
+                  <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl space-y-4">
+                    <div className="flex items-center gap-2 pb-3 border-b border-slate-800">
+                      <Search className="h-5 w-5 text-indigo-400" />
+                      <h3 className="font-bold text-white text-md">Dò tìm & Tự động cấu hình bằng IP</h3>
+                    </div>
 
-                  <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-                    {printers.length === 0 ? (
-                      <span className="text-slate-500 text-xs italic">Hệ thống chưa có máy in cấu hình...</span>
-                    ) : (
-                      printers.map((p) => (
-                        <div key={p.id} className="p-4 bg-slate-950 rounded-xl border border-slate-800 flex justify-between items-center hover:border-slate-700 transition-colors">
-                          <div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-bold text-xs text-white">{p.displayName}</span>
-                              <span className="bg-slate-800 text-[10px] text-slate-400 px-2 py-0.5 rounded uppercase font-semibold">
-                                {p.name}
-                              </span>
-                            </div>
-                            <div className="text-[10px] text-slate-400 mt-1.5 font-mono truncate max-w-xs md:max-w-md">{p.connection}</div>
-                            {p.location && <div className="text-[10px] text-slate-400 mt-1">📍 {p.location}</div>}
+                    <form onSubmit={handleDetectPrinter} className="flex gap-3">
+                      <div className="relative flex-1">
+                        <input
+                          type="text"
+                          placeholder="Nhập IP máy in (vd: 10.100.0.200)"
+                          value={detectIp}
+                          onChange={(e) => setDetectIp(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-4 pr-10 py-2.5 text-xs focus:outline-none focus:border-indigo-500 text-slate-200"
+                        />
+                        {detecting && (
+                          <div className="absolute right-3 top-2.5">
+                            <Loader2 className="animate-spin h-4 w-4 text-indigo-400" />
                           </div>
-                          <div className="flex items-center gap-3 shrink-0">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              p.status === 'IDLE' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                            }`}>
-                              {p.status}
-                            </span>
-                            <button
-                              onClick={() => startEditPrinter(p)}
-                              className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
-                                editingPrinterId === p.id 
-                                  ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/40' 
-                                  : 'text-slate-400 border-transparent hover:bg-slate-800 hover:text-white'
-                              }`}
-                              title="Sửa máy in"
-                            >
-                              <Edit className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              onClick={() => handleDeletePrinter(p.id, p.displayName)}
-                              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg border border-transparent hover:border-rose-500/20 transition-all cursor-pointer"
-                              title="Xóa máy in"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
+                        )}
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={detecting || !detectIp.trim()}
+                        className="bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl px-5 py-2.5 text-xs font-bold disabled:opacity-50 transition-all flex items-center gap-2 shrink-0 cursor-pointer"
+                      >
+                        {detecting ? 'Đang dò tìm...' : 'Dò tìm máy in'}
+                      </button>
+                    </form>
+
+                    {/* Step Log Output */}
+                    {detectStep && (
+                      <div className="flex items-center gap-2 text-xs text-indigo-300 bg-indigo-500/5 border border-indigo-500/10 px-3 py-2 rounded-lg font-mono">
+                        <Activity className="h-3.5 w-3.5 animate-pulse shrink-0" />
+                        <span>{detectStep}</span>
+                      </div>
+                    )}
+
+                    {/* Result Output */}
+                    {detectResult && (
+                      <div className={`p-4 rounded-xl border space-y-3 ${
+                        detectResult.online
+                          ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-300'
+                          : 'bg-rose-500/5 border-rose-500/20 text-rose-300'
+                      }`}>
+                        <div className="flex items-start gap-3">
+                          {detectResult.online ? (
+                            <Wifi className="h-5 w-5 text-emerald-400 shrink-0 mt-0.5" />
+                          ) : (
+                            <WifiOff className="h-5 w-5 text-rose-400 shrink-0 mt-0.5" />
+                          )}
+                          <div className="flex-1 space-y-1">
+                            <div className="text-xs font-bold uppercase tracking-wider">
+                              Trạng thái thiết bị: {detectResult.online ? 'ONLINE (Đang hoạt động)' : 'OFFLINE (Ngoại tuyến)'}
+                            </div>
+                            {detectResult.online ? (
+                              <>
+                                <p className="text-xs text-slate-300">
+                                  Phát hiện các cổng mở: <span className="font-mono text-white font-bold">{detectResult.openPorts.join(', ')}</span> ({detectResult.detectedProtocol}).
+                                </p>
+                                {detectResult.printerInfo ? (
+                                  <div className="bg-slate-950/40 p-2.5 rounded-lg border border-slate-800 text-[11px] text-slate-300 space-y-1 mt-2">
+                                    <div><strong>Model máy:</strong> {detectResult.printerInfo.displayName}</div>
+                                    <div><strong>In 2 mặt (Duplex):</strong> {detectResult.printerInfo.isDuplex ? 'Có hỗ trợ' : 'Không'}</div>
+                                    <div><strong>In màu (Color):</strong> {detectResult.printerInfo.isColor ? 'Có hỗ trợ' : 'Không'}</div>
+                                    <div className="break-all"><strong>URI Đề xuất:</strong> <code className="font-mono text-indigo-400">{detectResult.recommendedConnection}</code></div>
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-slate-400 italic mt-1">Giao thức IPP không phản hồi thông tin chi tiết. Đề xuất cấu hình thủ công cổng JetDirect (`9100`).</p>
+                                )}
+                              </>
+                            ) : (
+                              <p className="text-xs text-rose-400 mt-1">{detectResult.message}</p>
+                            )}
                           </div>
                         </div>
-                      ))
+
+                        {/* Actions or Troubleshooting */}
+                        {detectResult.online ? (
+                          <div className="flex justify-end pt-1">
+                            <button
+                              type="button"
+                              onClick={applyDetectConfig}
+                              className="bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg px-4 py-2 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-emerald-950/20"
+                            >
+                              Áp dụng cấu hình tự động
+                              <ArrowRight className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="bg-slate-950/60 p-3.5 rounded-lg border border-slate-800 space-y-2 mt-2">
+                            <div className="flex items-center gap-1.5 text-xs font-bold text-amber-400">
+                              <AlertCircle className="h-4 w-4 shrink-0" />
+                              Hướng dẫn sửa lỗi kết nối máy in
+                            </div>
+                            <ol className="list-decimal pl-4 text-[11px] text-slate-400 space-y-1.5">
+                              <li>Kiểm tra xem máy in HP 404 đã được bật nguồn và cắm cáp mạng LAN chắc chắn chưa.</li>
+                              <li>Mở cửa sổ dòng lệnh (Terminal) của server và gõ <code className="bg-slate-900 px-1 py-0.5 rounded text-white font-mono">ping {detectIp}</code> để kiểm tra độ thông suốt mạng.</li>
+                              <li>Đảm bảo các tính năng **IPP (Cổng 631)** hoặc **Raw TCP/AppSocket (Cổng 9100)** đã được bật (`Enabled`) trong phần cài đặt mạng mạng LAN của máy in (thông qua trang web quản trị của máy in).</li>
+                              <li>Nếu máy in và server nằm ở các dải IP khác nhau, hãy đảm bảo cổng switch hoặc tường lửa (firewall) cấu hình cho phép kết nối thông suốt.</li>
+                            </ol>
+                          </div>
+                        )}
+                      </div>
                     )}
+                  </div>
+
+                  {/* List of configuration printers */}
+                  <div className="bg-slate-900 p-8 rounded-2xl border border-slate-800 shadow-xl flex flex-col flex-1 overflow-hidden max-h-[350px]">
+                    <div className="flex items-center gap-2 pb-4 border-b border-slate-800 mb-4">
+                      <Printer className="h-5 w-5 text-indigo-400" />
+                      <h3 className="font-bold text-white text-md">Cấu hình máy in hệ thống</h3>
+                    </div>
+
+                    <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+                      {printers.length === 0 ? (
+                        <span className="text-slate-500 text-xs italic">Hệ thống chưa có máy in cấu hình...</span>
+                      ) : (
+                        printers.map((p) => (
+                          <div key={p.id} className="p-4 bg-slate-950 rounded-xl border border-slate-800 flex justify-between items-center hover:border-slate-700 transition-colors">
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-bold text-xs text-white">{p.displayName}</span>
+                                <span className="bg-slate-800 text-[10px] text-slate-400 px-2 py-0.5 rounded uppercase font-semibold">
+                                  {p.name}
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-slate-400 mt-1.5 font-mono truncate max-w-xs md:max-w-md">{p.connection}</div>
+                              {p.location && <div className="text-[10px] text-slate-400 mt-1">📍 {p.location}</div>}
+                            </div>
+                            <div className="flex items-center gap-3 shrink-0">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                p.status === 'IDLE' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                              }`}>
+                                {p.status}
+                              </span>
+                              <button
+                                onClick={() => startEditPrinter(p)}
+                                className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                                  editingPrinterId === p.id 
+                                    ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/40' 
+                                    : 'text-slate-400 border-transparent hover:bg-slate-800 hover:text-white'
+                                }`}
+                                title="Sửa máy in"
+                              >
+                                <Edit className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDeletePrinter(p.id, p.displayName)}
+                                className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg border border-transparent hover:border-rose-500/20 transition-all cursor-pointer"
+                                title="Xóa máy in"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
