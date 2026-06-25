@@ -25,7 +25,7 @@ ENV NEXTAUTH_SECRET="dummy_secret_for_build"
 RUN npm run build
 
 # 7. Expose cổng chạy ứng dụng
-EXPOSE 3000
+EXPOSE 3500
 
 # 8. Chạy ứng dụng Next.js ở chế độ Production
 CMD ["npm", "run", "start"]
