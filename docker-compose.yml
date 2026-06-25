@@ -3,9 +3,7 @@ version: '3.8'
 services:
   # 1. Ứng dụng Web Next.js
   nextjs-app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/saodonga/aptmayin:latest
     container_name: printer_server_app
     restart: always
     ports:
