@@ -1,6 +1,36 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import ipp from 'ipp';
 
+/**
+ * Patch the ipp library to recognize CUPS-specific IPP attributes that are
+ * not part of the standard RFC 2911 attribute set. These must be registered
+ * before any serialization occurs so the library can encode them correctly.
+ *
+ * Tag byte references (from ipp/lib/tags.js):
+ *   uri     = 0x45
+ *   keyword = 0x44
+ *   boolean = 0x22
+ *   integer = 0x21
+ */
+function patchIppWithCupsAttributes() {
+  const printerGroup = (ipp as any).attributes?.['printer-attributes-tag'];
+  if (!printerGroup) return;
+
+  // CUPS-Add-Modify-Printer (0x4003) attributes — not in RFC 2911
+  if (!printerGroup['device-uri']) {
+    printerGroup['device-uri']          = { type: 'uri',     tag: 0x45, max: 1023 };
+  }
+  if (!printerGroup['ppd-name']) {
+    printerGroup['ppd-name']            = { type: 'keyword', tag: 0x44, min: 1, max: 1023 };
+  }
+  if (!printerGroup['printer-is-shared']) {
+    printerGroup['printer-is-shared']   = { type: 'boolean', tag: 0x22 };
+  }
+}
+// Run once at module load — Node.js caches modules so this affects all callers
+patchIppWithCupsAttributes();
+
+
 interface CupsOperationOptions {
   operation: number; // e.g. 0x4003 for Add-Printer, 0x4004 for Delete-Printer, 0x400B for Get-Devices
   isAdminPath?: boolean; // true for /admin/, false for /
@@ -92,7 +122,7 @@ export async function ensureCupsPrinterQueue(name: string, connection: string): 
         'printer-attributes-tag': {
           'device-uri': connection,
           'printer-is-accepting-jobs': true,
-          'printer-state': 3, // idle
+          'printer-state': 'idle',
           ...(isIpp ? { 'ppd-name': 'everywhere' } : { 'ppd-name': 'raw' })
         }
       })
