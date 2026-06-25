@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { Role } from '@prisma/client';
-import ipp from 'ipp';
+import { executeCupsOperation } from '@/lib/cups';
 
 export const dynamic = 'force-dynamic';
 
@@ -79,120 +79,52 @@ export async function GET(req: Request) {
       return NextResponse.json({ success: true, printers: mockPrinters, mock: true });
     }
 
-    // CUPS server configuration
-    const cupsUser = process.env.CUPS_SERVER_USER || 'admin';
-    const cupsPassword = process.env.CUPS_SERVER_PASSWORD || 'admin_secret';
-    const cupsHost = process.env.CUPS_SERVER_HOST || 'cups-server:631';
-    const url = `http://${cupsUser}:${cupsPassword}@${cupsHost}/`;
-
-    const printer = ipp.Printer(url);
-    const msg = {
-      'operation-attributes-tag': {
-        'requesting-user-name': cupsUser,
-        'device-class': 'local' // local queries restrict CUPS to physical/USB connections
-      }
-    };
-
-    const cupsResult = await new Promise<{ success: boolean; printers?: any[]; error?: string }>((resolve) => {
-      // 0x400B is CUPS-Get-Devices
-      printer.execute(0x400B as any, msg, (err: any, res: any) => {
-        if (err) {
-          resolve({ success: false, error: err.message || String(err) });
-          return;
-        }
-
-        const printerTags = res['printer-attributes-tag'] || res['device-attributes-tag'] || [];
-        const tagsArray = Array.isArray(printerTags) ? printerTags : [printerTags];
-        const usbPrinters: any[] = [];
-
-        for (const tag of tagsArray) {
-          if (!tag) continue;
-
-          const getVal = (field: string) => {
-            const f = tag[field];
-            if (f === undefined || f === null) return '';
-            return typeof f === 'object' && 'value' in f ? f.value : f;
-          };
-
-          const uri = getVal('device-uri') || getVal('uri');
-          const info = getVal('device-info') || getVal('info') || getVal('device-make-and-model') || 'Unknown USB Printer';
-          const makeAndModel = getVal('device-make-and-model') || info;
-          const deviceClass = getVal('device-class') || '';
-
-          if (uri && (uri.startsWith('usb://') || deviceClass === 'local')) {
-            const inferred = inferDuplexAndColorFromModel(makeAndModel);
-            usbPrinters.push({
-              uri,
-              displayName: info,
-              isColor: inferred.color,
-              isDuplex: inferred.duplex
-            });
+    try {
+      const res = await executeCupsOperation({
+        operation: 0x400B, // CUPS-Get-Devices
+        isAdminPath: false,
+        getMsg: (username) => ({
+          'operation-attributes-tag': {
+            'requesting-user-name': username,
+            'device-class': 'local'
           }
-        }
-
-        resolve({ success: true, printers: usbPrinters });
-      });
-    });
-
-    if (!cupsResult.success) {
-      // If error, try a secondary user context fallback ('root') just in case
-      const rootUrl = `http://root:${cupsPassword}@${cupsHost}/`;
-      const rootPrinter = ipp.Printer(rootUrl);
-      const rootMsg = {
-        'operation-attributes-tag': {
-          'requesting-user-name': 'root',
-          'device-class': 'local'
-        }
-      };
-
-      const fallbackResult = await new Promise<{ success: boolean; printers?: any[]; error?: string }>((resolve) => {
-        rootPrinter.execute(0x400B as any, rootMsg, (err: any, res: any) => {
-          if (err) {
-            resolve({ success: false, error: err.message || String(err) });
-            return;
-          }
-
-          const printerTags = res['printer-attributes-tag'] || res['device-attributes-tag'] || [];
-          const tagsArray = Array.isArray(printerTags) ? printerTags : [printerTags];
-          const usbPrinters: any[] = [];
-
-          for (const tag of tagsArray) {
-            if (!tag) continue;
-
-            const getVal = (field: string) => {
-              const f = tag[field];
-              if (f === undefined || f === null) return '';
-              return typeof f === 'object' && 'value' in f ? f.value : f;
-            };
-
-            const uri = getVal('device-uri') || getVal('uri');
-            const info = getVal('device-info') || getVal('info') || getVal('device-make-and-model') || 'Unknown USB Printer';
-            const makeAndModel = getVal('device-make-and-model') || info;
-            const deviceClass = getVal('device-class') || '';
-
-            if (uri && (uri.startsWith('usb://') || deviceClass === 'local')) {
-              const inferred = inferDuplexAndColorFromModel(makeAndModel);
-              usbPrinters.push({
-                uri,
-                displayName: info,
-                isColor: inferred.color,
-                isDuplex: inferred.duplex
-              });
-            }
-          }
-
-          resolve({ success: true, printers: usbPrinters });
-        });
+        })
       });
 
-      if (fallbackResult.success) {
-        return NextResponse.json(fallbackResult);
+      const printerTags = res['printer-attributes-tag'] || res['device-attributes-tag'] || [];
+      const tagsArray = Array.isArray(printerTags) ? printerTags : [printerTags];
+      const usbPrinters: any[] = [];
+
+      for (const tag of tagsArray) {
+        if (!tag) continue;
+
+        const getVal = (field: string) => {
+          const f = tag[field];
+          if (f === undefined || f === null) return '';
+          return typeof f === 'object' && 'value' in f ? f.value : f;
+        };
+
+        const uri = getVal('device-uri') || getVal('uri');
+        const info = getVal('device-info') || getVal('info') || getVal('device-make-and-model') || 'Unknown USB Printer';
+        const makeAndModel = getVal('device-make-and-model') || info;
+        const deviceClass = getVal('device-class') || '';
+
+        if (uri && (uri.startsWith('usb://') || deviceClass === 'local')) {
+          const inferred = inferDuplexAndColorFromModel(makeAndModel);
+          usbPrinters.push({
+            uri,
+            displayName: info,
+            isColor: inferred.color,
+            isDuplex: inferred.duplex
+          });
+        }
       }
 
-      return NextResponse.json({ error: cupsResult.error || fallbackResult.error || 'Lỗi kết nối CUPS' }, { status: 500 });
+      return NextResponse.json({ success: true, printers: usbPrinters });
+    } catch (err: any) {
+      console.error('[USB SCAN] CUPS scan error:', err);
+      return NextResponse.json({ error: err.message || 'Lỗi kết nối CUPS' }, { status: 500 });
     }
-
-    return NextResponse.json(cupsResult);
   } catch (error: any) {
     return NextResponse.json({ error: error.message || 'Lỗi hệ thống!' }, { status: 500 });
   }
