@@ -7,7 +7,7 @@ services:
     container_name: printer_server_app
     restart: always
     ports:
-      - "3500:3500"
+      - "8028:3500"
     env_file:
       - .env
     volumes:
