@@ -25,7 +25,8 @@ import {
   WifiOff,
   AlertCircle,
   Activity,
-  ArrowRight
+  ArrowRight,
+  Usb
 } from 'lucide-react';
 
 interface PrintJob {
@@ -120,6 +121,16 @@ export default function DashboardPage() {
     } | null;
   } | null>(null);
   const [detectStep, setDetectStep] = useState<string>('');
+
+  // USB Printer Detection States
+  const [detectingUsb, setDetectingUsb] = useState(false);
+  const [usbPrinters, setUsbPrinters] = useState<{
+    uri: string;
+    displayName: string;
+    isColor: boolean;
+    isDuplex: boolean;
+  }[] | null>(null);
+  const [usbScanError, setUsbScanError] = useState<string | null>(null);
 
   // Loading & Action states
   const [loading, setLoading] = useState(false);
@@ -432,6 +443,43 @@ export default function DashboardPage() {
     }
     
     alert('Đã áp dụng cấu hình tự động vào Form! Hãy đặt vị trí và kiểm tra lại trước khi đăng ký.');
+  };
+
+  const handleScanUsbPrinters = async () => {
+    setDetectingUsb(true);
+    setUsbPrinters(null);
+    setUsbScanError(null);
+
+    try {
+      const res = await fetch('/api/admin/printers/usb');
+      const data = await res.json();
+      if (!res.ok) {
+        setUsbScanError(data.error || 'Lỗi không xác định khi quét cổng USB.');
+        return;
+      }
+      setUsbPrinters(data.printers || []);
+    } catch (e) {
+      setUsbScanError('Không thể kết nối đến máy chủ Next.js.');
+    } finally {
+      setDetectingUsb(false);
+    }
+  };
+
+  const applyUsbConfig = (printer: { uri: string; displayName: string; isColor: boolean; isDuplex: boolean }) => {
+    setNewPrinterDisplayName(printer.displayName);
+    setNewPrinterConnection(printer.uri);
+    setNewPrinterColor(printer.isColor);
+    setNewPrinterDuplex(printer.isDuplex);
+
+    // Auto generate name based on model name
+    const cleanName = printer.displayName
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/(^_|_$)/g, '');
+    setNewPrinterName(cleanName);
+
+    alert('Đã áp dụng cấu hình máy in USB vào Form! Hãy đặt vị trí và kiểm tra trước khi đăng ký.');
   };
 
   // Action Admin: Update User Quota
@@ -1077,6 +1125,73 @@ export default function DashboardPage() {
                       {editingPrinterId ? 'Sửa thông tin máy in' : 'Thêm máy in mới'}
                     </h3>
                   </div>
+
+                  {/* USB Scanning Feature */}
+                  {!editingPrinterId && (
+                    <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 space-y-2 animate-fade-in">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider flex items-center gap-1.5">
+                          <Usb className="h-3.5 w-3.5 text-indigo-400" />
+                          Kết nối USB trực tiếp
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleScanUsbPrinters}
+                          disabled={detectingUsb}
+                          className="bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/20 hover:border-indigo-500/40 rounded-lg px-2.5 py-1 text-[10px] font-bold transition-all disabled:opacity-50 flex items-center gap-1 cursor-pointer"
+                        >
+                          {detectingUsb ? (
+                            <>
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              Đang quét...
+                            </>
+                          ) : (
+                            'Quét cổng USB'
+                          )}
+                        </button>
+                      </div>
+
+                      {/* USB Scan Results */}
+                      {usbPrinters !== null && (
+                        <div className="space-y-1.5 pt-1 border-t border-slate-800">
+                          {usbPrinters.length === 0 ? (
+                            <div className="text-[10px] text-amber-400/90 italic flex items-center gap-1">
+                              <AlertCircle className="h-3 w-3 shrink-0 text-amber-400" />
+                              Không phát hiện máy in USB nào. Hãy cắm cáp USB và kiểm tra nguồn máy in.
+                            </div>
+                          ) : (
+                            <div className="space-y-1.5 max-h-[120px] overflow-y-auto pr-0.5">
+                              <div className="text-[9px] text-slate-400 font-medium">Tìm thấy {usbPrinters.length} thiết bị (Click để điền nhanh):</div>
+                              {usbPrinters.map((up, idx) => (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => applyUsbConfig(up)}
+                                  className="w-full text-left bg-slate-900 hover:bg-indigo-950/40 border border-slate-800 hover:border-indigo-500/30 p-2 rounded-lg text-[10px] transition-all flex justify-between items-center gap-2 cursor-pointer group"
+                                >
+                                  <div className="truncate flex-1">
+                                    <span className="font-bold text-slate-200 group-hover:text-indigo-300 transition-colors">{up.displayName}</span>
+                                    <div className="font-mono text-[8px] text-slate-500 truncate mt-0.5">{up.uri}</div>
+                                  </div>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    {up.isDuplex && <span className="bg-emerald-500/10 text-emerald-400 text-[8px] px-1 py-0.2 rounded font-bold shrink-0">2M</span>}
+                                    {up.isColor && <span className="bg-indigo-500/10 text-indigo-400 text-[8px] px-1 py-0.2 rounded font-bold shrink-0">Màu</span>}
+                                    <ArrowRight className="h-3 w-3 text-slate-500 group-hover:text-indigo-400 group-hover:translate-x-0.5 transition-all" />
+                                  </div>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {usbScanError && (
+                        <div className="text-[10px] text-rose-400 bg-rose-500/5 border border-rose-500/10 p-2 rounded-lg mt-1">
+                          Lỗi quét: {usbScanError}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tên CUPS (Không dấu/Khoảng trắng)</label>

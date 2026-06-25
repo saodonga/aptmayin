@@ -120,6 +120,19 @@ export async function POST(req: Request) {
             : attrs['color-supported'].value === true || attrs['color-supported'] === 'true';
         }
 
+        // Fallback color inference based on model name
+        if (!color) {
+          const modelLower = model.toLowerCase();
+          if (
+            modelLower.includes('color') ||
+            modelLower.includes('colour') ||
+            modelLower.includes('colorjet') ||
+            /\b[a-z0-9]*(c|cdw)\b/.test(modelLower)
+          ) {
+            color = true;
+          }
+        }
+
         // Extract Duplex support
         let duplex = false;
         if (attrs['sides-supported']) {
@@ -129,6 +142,24 @@ export async function POST(req: Request) {
           
           const sidesStrings = sides.map(s => typeof s === 'string' ? s : s.value || String(s));
           duplex = sidesStrings.some(s => s.includes('two-sided-long-edge') || s.includes('two-sided-short-edge'));
+        }
+
+        // Fallback duplex inference based on model name
+        if (!duplex) {
+          const modelLower = model.toLowerCase();
+          if (
+            modelLower.includes('duplex') ||
+            modelLower.includes('m404') ||
+            modelLower.includes('m405') ||
+            modelLower.includes('m402') ||
+            modelLower.includes('m403') ||
+            modelLower.includes('m506') ||
+            modelLower.includes('m507') ||
+            /\b[a-z0-9]+(dn|dw|dtn|dx)\b/.test(modelLower) ||
+            /\b[a-z0-9]+-d[a-z]*\b/.test(modelLower)
+          ) {
+            duplex = true;
+          }
         }
 
         ippDetails = { model, color, duplex };
