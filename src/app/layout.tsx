@@ -26,11 +26,11 @@ export const metadata: Metadata = {
   title: 'Máy In Tự Xa – Remote Print Server',
   description:
     'Hệ thống quản lý và in ấn từ xa – gửi tài liệu đến máy in qua mạng nội bộ hoặc Internet.',
-  applicationName: 'Máy In Tự Xa',
+  applicationName: 'MayInKTS',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
-    title: 'Máy In Tự Xa',
+    title: 'MayInKTS',
   },
   formatDetection: { telephone: false },
   icons: {

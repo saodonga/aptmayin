@@ -2,8 +2,8 @@ import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'Máy In Tự Xa',
-    short_name: 'MáyIn',
+    name: 'MayInKTS',
+    short_name: 'MayInKTS',
     description: 'Hệ thống quản lý và in ấn từ xa – gửi tài liệu đến máy in qua mạng.',
     start_url: '/',
     display: 'standalone',
