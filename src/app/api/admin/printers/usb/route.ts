@@ -1,8 +1,9 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/lib/auth';
 import { Role } from '@prisma/client';
-import { executeCupsOperation } from '@/lib/cups';
+import { cupsGetDevices } from '@/lib/cups';
 
 export const dynamic = 'force-dynamic';
 
@@ -52,47 +53,20 @@ export async function GET(req: Request) {
     const mockMode = process.env.MOCK_PRINTING === 'true';
 
     if (mockMode) {
-      // Simulate delay for realistic frontend scan experience
       await new Promise((resolve) => setTimeout(resolve, 1200));
-
-      const mockPrinters = [
-        {
-          uri: 'usb://HP/LaserJet%20Pro%20M404dn?serial=PH123456',
-          displayName: 'HP LaserJet Pro M404dn (USB)',
-          isColor: false,
-          isDuplex: true,
-        },
-        {
-          uri: 'usb://Canon/LBP2900?serial=CN987654',
-          displayName: 'Canon LBP2900 (USB)',
-          isColor: false,
-          isDuplex: false,
-        },
-        {
-          uri: 'usb://Epson/L3110?serial=EP771122',
-          displayName: 'Epson L3110 Series (USB)',
-          isColor: true,
-          isDuplex: false,
-        }
-      ];
-
-      return NextResponse.json({ success: true, printers: mockPrinters, mock: true });
+      return NextResponse.json({
+        success: true,
+        mock: true,
+        printers: [
+          { uri: 'usb://HP/LaserJet%20Pro%20M404dn?serial=PH123456', displayName: 'HP LaserJet Pro M404dn (USB)', isColor: false, isDuplex: true },
+          { uri: 'usb://Canon/LBP2900?serial=CN987654',              displayName: 'Canon LBP2900 (USB)',           isColor: false, isDuplex: false },
+          { uri: 'usb://Epson/L3110?serial=EP771122',                displayName: 'Epson L3110 Series (USB)',      isColor: true,  isDuplex: false },
+        ],
+      });
     }
 
     try {
-      const res = await executeCupsOperation({
-        operation: 0x400B, // CUPS-Get-Devices
-        isAdminPath: false,
-        getMsg: (username) => ({
-          'operation-attributes-tag': {
-            'requesting-user-name': username,
-            'device-class': 'local'
-          }
-        })
-      });
-
-      const printerTags = res['printer-attributes-tag'] || res['device-attributes-tag'] || [];
-      const tagsArray = Array.isArray(printerTags) ? printerTags : [printerTags];
+      const tagsArray = await cupsGetDevices();
       const usbPrinters: any[] = [];
 
       for (const tag of tagsArray) {
@@ -104,19 +78,14 @@ export async function GET(req: Request) {
           return typeof f === 'object' && 'value' in f ? f.value : f;
         };
 
-        const uri = getVal('device-uri') || getVal('uri');
-        const info = getVal('device-info') || getVal('info') || getVal('device-make-and-model') || 'Unknown USB Printer';
+        const uri          = getVal('device-uri') || getVal('uri');
+        const info         = getVal('device-info') || getVal('info') || getVal('device-make-and-model') || 'Unknown USB Printer';
         const makeAndModel = getVal('device-make-and-model') || info;
-        const deviceClass = getVal('device-class') || '';
+        const deviceClass  = getVal('device-class') || '';
 
         if (uri && (uri.startsWith('usb://') || deviceClass === 'local')) {
           const inferred = inferDuplexAndColorFromModel(makeAndModel);
-          usbPrinters.push({
-            uri,
-            displayName: info,
-            isColor: inferred.color,
-            isDuplex: inferred.duplex
-          });
+          usbPrinters.push({ uri, displayName: info, isColor: inferred.color, isDuplex: inferred.duplex });
         }
       }
 
