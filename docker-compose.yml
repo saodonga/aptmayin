@@ -26,8 +26,12 @@ services:
     volumes:
       - /var/run/dbus:/var/run/dbus  # Hỗ trợ tự động dò quét máy in
       - /dev/bus/usb:/dev/bus/usb    # Map cổng USB máy host vào container
+      - cups-config:/etc/cups        # Lưu trữ cấu hình máy in CUPS
+      - cups-spool:/var/spool/cups   # Lưu trữ hàng đợi in
     environment:
       - ADMIN_PASSWORD=admin_secret
 
 volumes:
   temp-print-files:
+  cups-config:
+  cups-spool:
