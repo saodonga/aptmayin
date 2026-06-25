@@ -22,7 +22,7 @@ services:
     privileged: true # Cần thiết để nhận cổng USB trên máy chủ Linux Host
     restart: always
     ports:
-      - "631:631"
+      - "6315:631"
     volumes:
       - /var/run/dbus:/var/run/dbus  # Hỗ trợ tự động dò quét máy in
       - /dev/bus/usb:/dev/bus/usb    # Map cổng USB máy host vào container
