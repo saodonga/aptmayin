@@ -20,6 +20,8 @@ COPY . .
 
 # 6. Tắt telemetry và Build ứng dụng Next.js
 ENV NEXT_TELEMETRY_DISABLED 1
+ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
+ENV NEXTAUTH_SECRET="dummy_secret_for_build"
 RUN npm run build
 
 # 7. Expose cổng chạy ứng dụng
