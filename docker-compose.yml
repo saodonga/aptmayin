@@ -33,5 +33,20 @@ services:
 
 volumes:
   temp-print-files:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '${PWD}/temp'
   cups-config:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '${PWD}/cups/config'
   cups-spool:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '${PWD}/cups/spool'
