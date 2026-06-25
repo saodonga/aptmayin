@@ -17,7 +17,9 @@ import {
   Shield, 
   UserPlus, 
   RefreshCw,
-  FileText
+  FileText,
+  Edit,
+  Trash2
 } from 'lucide-react';
 
 interface PrintJob {
@@ -94,6 +96,7 @@ export default function DashboardPage() {
   const [newPrinterLocation, setNewPrinterLocation] = useState('');
   const [newPrinterColor, setNewPrinterColor] = useState(false);
   const [newPrinterDuplex, setNewPrinterDuplex] = useState(true);
+  const [editingPrinterId, setEditingPrinterId] = useState<string | null>(null);
 
   // Loading & Action states
   const [loading, setLoading] = useState(false);
@@ -246,17 +249,21 @@ export default function DashboardPage() {
     }
   };
 
-  // Action Admin: Create new printer
-  const handleAddPrinter = async (e: React.FormEvent) => {
+  // Action Admin: Create or Update printer
+  const handlePrinterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPrinterName || !newPrinterDisplayName || !newPrinterConnection) {
       alert('Vui lòng điền đủ thông tin bắt buộc!');
       return;
     }
 
+    const isEdit = !!editingPrinterId;
+    const url = isEdit ? `/api/admin/printers/${editingPrinterId}` : '/api/admin/printers';
+    const method = isEdit ? 'PATCH' : 'POST';
+
     try {
-      const res = await fetch('/api/admin/printers', {
-        method: 'POST',
+      const res = await fetch(url, {
+        method: method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: newPrinterName,
@@ -269,11 +276,58 @@ export default function DashboardPage() {
       });
 
       if (res.ok) {
-        alert('Thêm máy in thành công!');
+        alert(isEdit ? 'Cập nhật thông tin máy in thành công!' : 'Thêm máy in thành công!');
         setNewPrinterName('');
         setNewPrinterDisplayName('');
         setNewPrinterConnection('');
         setNewPrinterLocation('');
+        setNewPrinterColor(false);
+        setNewPrinterDuplex(true);
+        setEditingPrinterId(null);
+        fetchData();
+      } else {
+        const d = await res.json();
+        alert(`Lỗi: ${d.error}`);
+      }
+    } catch (e) {
+      alert('Không thể kết nối đến máy chủ!');
+    }
+  };
+
+  const startEditPrinter = (printer: PrinterConfig) => {
+    setEditingPrinterId(printer.id);
+    setNewPrinterName(printer.name);
+    setNewPrinterDisplayName(printer.displayName);
+    setNewPrinterConnection(printer.connection);
+    setNewPrinterLocation(printer.location || '');
+    setNewPrinterColor(printer.isColor);
+    setNewPrinterDuplex(printer.isDuplex);
+  };
+
+  const cancelEditPrinter = () => {
+    setEditingPrinterId(null);
+    setNewPrinterName('');
+    setNewPrinterDisplayName('');
+    setNewPrinterConnection('');
+    setNewPrinterLocation('');
+    setNewPrinterColor(false);
+    setNewPrinterDuplex(true);
+  };
+
+  const handleDeletePrinter = async (printerId: string, displayName: string) => {
+    const confirmDelete = confirm(`Bạn có thực sự muốn xóa máy in "${displayName}" khỏi hệ thống? Các lịch sử in liên quan cũng sẽ bị xóa.`);
+    if (!confirmDelete) return;
+
+    try {
+      const res = await fetch(`/api/admin/printers/${printerId}`, {
+        method: 'DELETE',
+      });
+
+      if (res.ok) {
+        alert('Xóa máy in thành công!');
+        if (editingPrinterId === printerId) {
+          cancelEditPrinter();
+        }
         fetchData();
       } else {
         const d = await res.json();
@@ -916,10 +970,16 @@ export default function DashboardPage() {
               {/* Panel Top row: Add printer */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                 {/* Form Add Printer */}
-                <form onSubmit={handleAddPrinter} className="bg-slate-900 p-8 rounded-2xl border border-slate-800 shadow-xl space-y-5">
+                <form onSubmit={handlePrinterSubmit} className="bg-slate-900 p-8 rounded-2xl border border-slate-800 shadow-xl space-y-5">
                   <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
-                    <Plus className="h-5 w-5 text-indigo-400" />
-                    <h3 className="font-bold text-white text-md">Thêm máy in mới</h3>
+                    {editingPrinterId ? (
+                      <Edit className="h-5 w-5 text-indigo-400" />
+                    ) : (
+                      <Plus className="h-5 w-5 text-indigo-400" />
+                    )}
+                    <h3 className="font-bold text-white text-md">
+                      {editingPrinterId ? 'Sửa thông tin máy in' : 'Thêm máy in mới'}
+                    </h3>
                   </div>
 
                   <div className="space-y-1.5">
@@ -991,12 +1051,23 @@ export default function DashboardPage() {
                     </label>
                   </div>
 
-                  <button
-                    type="submit"
-                    className="w-full bg-indigo-600 text-white rounded-xl py-2.5 text-xs font-bold hover:bg-indigo-500 hover:scale-[1.01] active:scale-[0.99] transition-all"
-                  >
-                    Đăng ký máy in
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      type="submit"
+                      className="flex-1 bg-indigo-600 text-white rounded-xl py-2.5 text-xs font-bold hover:bg-indigo-500 hover:scale-[1.01] active:scale-[0.99] transition-all cursor-pointer"
+                    >
+                      {editingPrinterId ? 'Cập nhật máy in' : 'Đăng ký máy in'}
+                    </button>
+                    {editingPrinterId && (
+                      <button
+                        type="button"
+                        onClick={cancelEditPrinter}
+                        className="bg-slate-800 text-slate-300 rounded-xl px-4 py-2.5 text-xs font-bold hover:bg-slate-700 transition-all cursor-pointer"
+                      >
+                        Hủy
+                      </button>
+                    )}
+                  </div>
                 </form>
 
                 {/* List of configuration printers */}
@@ -1011,15 +1082,15 @@ export default function DashboardPage() {
                       <span className="text-slate-500 text-xs italic">Hệ thống chưa có máy in cấu hình...</span>
                     ) : (
                       printers.map((p) => (
-                        <div key={p.id} className="p-4 bg-slate-950 rounded-xl border border-slate-800 flex justify-between items-center">
+                        <div key={p.id} className="p-4 bg-slate-950 rounded-xl border border-slate-800 flex justify-between items-center hover:border-slate-700 transition-colors">
                           <div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-bold text-xs text-white">{p.displayName}</span>
                               <span className="bg-slate-800 text-[10px] text-slate-400 px-2 py-0.5 rounded uppercase font-semibold">
                                 {p.name}
                               </span>
                             </div>
-                            <div className="text-[10px] text-slate-400 mt-1.5 font-mono">{p.connection}</div>
+                            <div className="text-[10px] text-slate-400 mt-1.5 font-mono truncate max-w-xs md:max-w-md">{p.connection}</div>
                             {p.location && <div className="text-[10px] text-slate-400 mt-1">📍 {p.location}</div>}
                           </div>
                           <div className="flex items-center gap-3 shrink-0">
@@ -1028,6 +1099,24 @@ export default function DashboardPage() {
                             }`}>
                               {p.status}
                             </span>
+                            <button
+                              onClick={() => startEditPrinter(p)}
+                              className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                                editingPrinterId === p.id 
+                                  ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/40' 
+                                  : 'text-slate-400 border-transparent hover:bg-slate-800 hover:text-white'
+                              }`}
+                              title="Sửa máy in"
+                            >
+                              <Edit className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeletePrinter(p.id, p.displayName)}
+                              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg border border-transparent hover:border-rose-500/20 transition-all cursor-pointer"
+                              title="Xóa máy in"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
                           </div>
                         </div>
                       ))
