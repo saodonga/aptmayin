@@ -8,6 +8,11 @@ export const authOptions: AuthOptions = {
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID || '',
       clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+      // Increase timeout for openid-client discovery requests.
+      // Default is 3500ms which times out in some network conditions.
+      httpOptions: {
+        timeout: 10000,
+      },
     }),
   ],
   session: {

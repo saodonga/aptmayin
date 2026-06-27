@@ -36,9 +36,17 @@ interface TestResult {
  * Test a printer connection by sending an IPP Get-Printer-Attributes request.
  * For socket:// (AppSocket) connections we do a raw TCP connect test.
  */
-async function testConnection(connectionUri: string): Promise<TestResult> {
+async function testConnection(rawUri: string): Promise<TestResult> {
   const t0 = Date.now();
   const timeoutMs = 6000;
+
+  // Auto-rewrite cups-server to localhost:6315 to bypass docker-internal hostname in dev mode
+  let connectionUri = rawUri;
+  if (connectionUri.includes('cups-server:')) {
+    connectionUri = connectionUri.replace('cups-server:631', 'localhost:6315');
+  } else if (connectionUri.includes('localhost:631/')) {
+    connectionUri = connectionUri.replace('localhost:631', 'localhost:6315');
+  }
 
   try {
     // ── AppSocket / JetDirect ─────────────────────────────────────────────

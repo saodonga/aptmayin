@@ -124,7 +124,20 @@ export async function POST(req: Request) {
     }
 
     // B. Chế độ in CUPS thật qua cổng IPP
-    const cupsPrinter = ipp.Printer(printer.connection);
+    console.log(`[API Print] Initiating Print-Job for printer ${printer.name}`);
+    console.log(`[API Print] Connection string from DB: ${printer.connection}`);
+    
+    // Auto-rewrite cups-server to localhost to bypass docker-internal hostname
+    let connUri = printer.connection;
+    if (connUri.includes('cups-server:')) {
+      connUri = connUri.replace('cups-server:631', 'localhost:6315');
+      console.log(`[API Print] Rewrote connection string to: ${connUri}`);
+    } else if (connUri.includes('localhost:631/')) {
+      connUri = connUri.replace('localhost:631', 'localhost:6315');
+      console.log(`[API Print] Rewrote connection string to: ${connUri}`);
+    }
+
+    const cupsPrinter = ipp.Printer(connUri);
     const ippMsg = {
       'operation-attributes-tag': {
         'requesting-user-name': user.email,
