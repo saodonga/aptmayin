@@ -26,7 +26,11 @@ import {
   AlertCircle,
   Activity,
   ArrowRight,
-  Usb
+  Usb,
+  Zap,
+  Globe,
+  Network,
+  Cable
 } from 'lucide-react';
 
 interface PrintJob {
@@ -113,6 +117,7 @@ export default function DashboardPage() {
     openPorts: number[];
     detectedProtocol?: string;
     recommendedConnection?: string;
+    successfulIppPath?: string | null;
     message?: string;
     printerInfo?: {
       displayName: string;
@@ -131,6 +136,26 @@ export default function DashboardPage() {
     isDuplex: boolean;
   }[] | null>(null);
   const [usbScanError, setUsbScanError] = useState<string | null>(null);
+
+  // Smart Connection Type Selector
+  type ConnProtocol = 'ipp' | 'socket' | 'lpd' | 'usb' | 'manual';
+  const [connProtocol, setConnProtocol] = useState<ConnProtocol>('ipp');
+  const [connIp, setConnIp] = useState('');
+  const [connPort, setConnPort] = useState('');
+  const [connPath, setConnPath] = useState('/ipp/print');
+
+  // Printer connection test states – keyed by printerId
+  const [testingPrinter, setTestingPrinter] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, {
+    ok: boolean;
+    latencyMs: number;
+    protocol: string;
+    status?: string;
+    model?: string;
+    error?: string;
+    mock?: boolean;
+    testedAt: number;
+  }>>({});
 
   // Loading & Action states
   const [loading, setLoading] = useState(false);
@@ -219,6 +244,26 @@ export default function DashboardPage() {
       }
     }
   }, [users, session, userData]);
+
+  // Sync Connection URI whenever smart-selector fields change.
+  // IMPORTANT: Must be declared BEFORE any early return to satisfy Rules of Hooks.
+  useEffect(() => {
+    if (connProtocol === 'manual' || connProtocol === 'usb') return;
+    const ip = connIp.trim();
+    if (!ip) { setNewPrinterConnection(''); return; }
+    let uri = '';
+    if (connProtocol === 'socket') {
+      uri = `socket://${ip}:${connPort || '9100'}`;
+    } else if (connProtocol === 'lpd') {
+      uri = `lpd://${ip}/${(connPath || 'queue').replace(/^\//, '')}`;
+    } else {
+      const port = connPort || '631';
+      const path = connPath || '/ipp/print';
+      uri = `ipp://${ip}:${port}${path.startsWith('/') ? path : '/' + path}`;
+    }
+    setNewPrinterConnection(uri);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connProtocol, connIp, connPort, connPath]);
 
   if (status === 'loading') {
     return (
@@ -336,6 +381,8 @@ export default function DashboardPage() {
     setNewPrinterLocation(printer.location || '');
     setNewPrinterColor(printer.isColor);
     setNewPrinterDuplex(printer.isDuplex);
+    // When editing, switch to manual mode so the existing URI is preserved as-is
+    setConnProtocol('manual');
   };
 
   const cancelEditPrinter = () => {
@@ -346,6 +393,10 @@ export default function DashboardPage() {
     setNewPrinterLocation('');
     setNewPrinterColor(false);
     setNewPrinterDuplex(true);
+    setConnProtocol('ipp');
+    setConnIp('');
+    setConnPort('');
+    setConnPath('/ipp/print');
   };
 
   const handleDeletePrinter = async (printerId: string, displayName: string) => {
@@ -381,8 +432,7 @@ export default function DashboardPage() {
     setDetectStep('Đang khởi tạo kết nối mạng...');
 
     try {
-      // Simulate steps for UI feedback
-      setTimeout(() => setDetectStep('Đang gửi lệnh quét cổng mạng (Ports: 9100, 631, 515, 80)...'), 600);
+      setTimeout(() => setDetectStep('Đang quét cổng mạng song song (9100, 631, 515, 80, 443)...'), 400);
       
       const res = await fetch('/api/admin/printers/detect', {
         method: 'POST',
@@ -398,21 +448,58 @@ export default function DashboardPage() {
       }
 
       if (data.online) {
-        if (data.openPorts.includes(631)) {
-          setDetectStep('Phát hiện dịch vụ IPP. Đang truy vấn cấu hình chi tiết (Model, Duplex, Color)...');
-          await new Promise(r => setTimeout(r, 800));
+        if (data.openPorts.includes(631) || data.openPorts.includes(443)) {
+          setDetectStep(`Phát hiện IPP${data.successfulIppPath ? ` tại ${data.successfulIppPath}` : ''}. Đang phân tích cấu hình máy in...`);
+          await new Promise(r => setTimeout(r, 600));
         }
         setDetectResult(data);
-        setDetectStep('Quét thành công! Thiết bị đang trực tuyến.');
+        setDetectStep(`Quét thành công! Giao thức: ${data.detectedProtocol}`);
       } else {
         setDetectResult(data);
-        setDetectStep('Quét hoàn tất: Thiết bị ngoại tuyến.');
+        setDetectStep('Quét hoàn tất: Thiết bị ngoại tuyến hoặc không phản hồi.');
       }
     } catch (e) {
       setDetectResult({ online: false, openPorts: [], message: 'Không thể kết nối tới server Next.js.' });
       setDetectStep('Quét lỗi: Lỗi kết nối.');
     } finally {
       setDetecting(false);
+    }
+  };
+
+  // buildConnectionUri is now inlined in the useEffect above (before early return).
+  // Keeping this helper for applyDetectConfig / URI parsing only.
+  const buildConnectionUri = (): string => {
+    if (connProtocol === 'manual' || connProtocol === 'usb') return newPrinterConnection;
+    const ip = connIp.trim();
+    if (!ip) return '';
+    if (connProtocol === 'socket') return `socket://${ip}:${connPort || '9100'}`;
+    if (connProtocol === 'lpd') return `lpd://${ip}/${(connPath || 'queue').replace(/^\//, '')}`;
+    const port = connPort || '631';
+    const path = connPath || '/ipp/print';
+    return `ipp://${ip}:${port}${path.startsWith('/') ? path : '/' + path}`;
+  };
+
+  // Test a printer's connection from Admin panel
+  const handleTestPrinterConnection = async (printerId: string) => {
+    setTestingPrinter(printerId);
+    try {
+      const res = await fetch('/api/admin/printers/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ printerId }),
+      });
+      const data = await res.json();
+      setTestResults(prev => ({
+        ...prev,
+        [printerId]: { ...data, testedAt: Date.now() },
+      }));
+    } catch (e) {
+      setTestResults(prev => ({
+        ...prev,
+        [printerId]: { ok: false, latencyMs: 0, protocol: 'Error', error: 'Lỗi kết nối server', testedAt: Date.now() },
+      }));
+    } finally {
+      setTestingPrinter(null);
     }
   };
 
@@ -439,10 +526,27 @@ export default function DashboardPage() {
     }
     
     if (detectResult.recommendedConnection) {
-      setNewPrinterConnection(detectResult.recommendedConnection);
+      // Sync smart selector fields from recommended connection
+      const uri = detectResult.recommendedConnection;
+      if (uri.startsWith('socket://')) {
+        setConnProtocol('socket');
+        const m = uri.match(/^socket:\/\/([^/:]+):?(\d+)?/);
+        if (m) { setConnIp(m[1]); setConnPort(m[2] || '9100'); }
+      } else if (uri.startsWith('lpd://')) {
+        setConnProtocol('lpd');
+        const m = uri.match(/^lpd:\/\/([^/]+)\/(.*)/);
+        if (m) { setConnIp(m[1]); setConnPath(m[2]); }
+      } else if (/^(ipp|ipps):\/\//.test(uri)) {
+        setConnProtocol('ipp');
+        const m = uri.match(/^ipp[s]?:\/\/([^/:]+):?(\d+)?(\/.*)?/);
+        if (m) { setConnIp(m[1]); setConnPort(m[2] || '631'); setConnPath(m[3] || '/ipp/print'); }
+      } else {
+        setConnProtocol('manual');
+        setNewPrinterConnection(uri);
+      }
     }
     
-    alert('Đã áp dụng cấu hình tự động vào Form! Hãy đặt vị trí và kiểm tra lại trước khi đăng ký.');
+    alert('Đã áp dụng cấu hình tự động! Hãy đặt vị trí và kiểm tra lại trước khi đăng ký.');
   };
 
   const handleScanUsbPrinters = async () => {
@@ -468,6 +572,7 @@ export default function DashboardPage() {
   const applyUsbConfig = (printer: { uri: string; displayName: string; isColor: boolean; isDuplex: boolean }) => {
     setNewPrinterDisplayName(printer.displayName);
     setNewPrinterConnection(printer.uri);
+    setConnProtocol('usb');
     setNewPrinterColor(printer.isColor);
     setNewPrinterDuplex(printer.isDuplex);
 
@@ -784,13 +889,37 @@ export default function DashboardPage() {
                       {printers.length === 0 ? (
                         <option value="">Chưa có máy in nào cấu hình trên hệ thống...</option>
                       ) : (
-                        printers.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.displayName} - {p.location || 'Không có vị trí'} ({p.connection})
-                          </option>
-                        ))
+                        printers.map((p) => {
+                          const testR = testResults[p.id];
+                          const statusMark = testR
+                            ? (testR.ok ? '🟢' : '🔴')
+                            : '⚪';
+                          return (
+                            <option key={p.id} value={p.id}>
+                              {statusMark} {p.displayName} — {p.location || 'N/A'}
+                            </option>
+                          );
+                        })
                       )}
                     </select>
+                    {/* Live status line for selected printer */}
+                    {selectedPrinter && testResults[selectedPrinter] && (
+                      <div className={`flex items-center gap-2 mt-1.5 text-[11px] px-1 ${
+                        testResults[selectedPrinter].ok ? 'text-emerald-400' : 'text-rose-400'
+                      }`}>
+                        {testResults[selectedPrinter].ok ? (
+                          <CheckCircle2 className="h-3 w-3 shrink-0" />
+                        ) : (
+                          <XCircle className="h-3 w-3 shrink-0" />
+                        )}
+                        <span>
+                          {testResults[selectedPrinter].ok
+                            ? `Online · ${testResults[selectedPrinter].status} · ${testResults[selectedPrinter].latencyMs}ms`
+                            : `Offline · ${testResults[selectedPrinter].error}`
+                          }
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Print Configuration grid */}
@@ -1219,14 +1348,116 @@ export default function DashboardPage() {
 
                   <div className="space-y-1.5">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Địa chỉ kết nối (Connection URI)</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="vd: ipp://10.100.0.200/printers/hp"
-                      value={newPrinterConnection}
-                      onChange={(e) => setNewPrinterConnection(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-indigo-500 text-slate-200"
-                    />
+
+                    {/* Smart Connection Type Selector */}
+                    {!editingPrinterId && (
+                      <div className="grid grid-cols-4 gap-1 p-1 bg-slate-950 rounded-lg border border-slate-800 mb-2">
+                        {([
+                          { key: 'ipp',    label: 'IPP',      Icon: Globe },
+                          { key: 'socket', label: 'JetDirect', Icon: Zap },
+                          { key: 'lpd',    label: 'LPD',      Icon: Network },
+                          { key: 'manual', label: 'Thủ công', Icon: Cable },
+                        ] as { key: ConnProtocol; label: string; Icon: React.ElementType }[]).map(({ key, label, Icon }) => (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => setConnProtocol(key)}
+                            className={`flex flex-col items-center gap-0.5 py-1.5 rounded text-[9px] font-bold transition-all ${
+                              connProtocol === key
+                                ? 'bg-indigo-600 text-white shadow'
+                                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                            }`}
+                          >
+                            <Icon className="h-3 w-3" />
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* IPP fields */}
+                    {!editingPrinterId && connProtocol === 'ipp' && (
+                      <div className="grid grid-cols-5 gap-1.5">
+                        <div className="col-span-2">
+                          <input
+                            type="text"
+                            placeholder="IP (vd: 10.0.0.1)"
+                            value={connIp}
+                            onChange={e => setConnIp(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-[11px] focus:outline-none focus:border-indigo-500 text-slate-200"
+                          />
+                        </div>
+                        <div className="col-span-1">
+                          <input
+                            type="text"
+                            placeholder="Port"
+                            value={connPort}
+                            onChange={e => setConnPort(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-[11px] focus:outline-none focus:border-indigo-500 text-slate-200"
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <select
+                            value={connPath}
+                            onChange={e => setConnPath(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2 py-2 text-[11px] focus:outline-none focus:border-indigo-500 text-slate-200"
+                          >
+                            <option value="/ipp/print">/ipp/print</option>
+                            <option value="/ipp/printer">/ipp/printer</option>
+                            <option value="/ipp/">/ipp/</option>
+                            <option value="/printers/">/printers/</option>
+                          </select>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* AppSocket fields */}
+                    {!editingPrinterId && connProtocol === 'socket' && (
+                      <div className="grid grid-cols-3 gap-1.5">
+                        <div className="col-span-2">
+                          <input type="text" placeholder="IP (vd: 10.0.0.1)" value={connIp} onChange={e => setConnIp(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-[11px] focus:outline-none focus:border-indigo-500 text-slate-200" />
+                        </div>
+                        <div>
+                          <input type="text" placeholder="9100" value={connPort} onChange={e => setConnPort(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-[11px] focus:outline-none focus:border-indigo-500 text-slate-200" />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* LPD fields */}
+                    {!editingPrinterId && connProtocol === 'lpd' && (
+                      <div className="grid grid-cols-3 gap-1.5">
+                        <div className="col-span-2">
+                          <input type="text" placeholder="IP" value={connIp} onChange={e => setConnIp(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-[11px] focus:outline-none focus:border-indigo-500 text-slate-200" />
+                        </div>
+                        <div>
+                          <input type="text" placeholder="queue" value={connPath} onChange={e => setConnPath(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-[11px] focus:outline-none focus:border-indigo-500 text-slate-200" />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* URI preview / manual field */}
+                    <div className="relative">
+                      <input
+                        type="text"
+                        required
+                        placeholder="vd: ipp://10.100.0.200:631/ipp/print"
+                        value={newPrinterConnection}
+                        onChange={(e) => {
+                          setNewPrinterConnection(e.target.value);
+                          if (!editingPrinterId) setConnProtocol('manual');
+                        }}
+                        className="w-full bg-slate-950 border border-indigo-500/30 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-indigo-500 text-indigo-300 font-mono"
+                      />
+                      {newPrinterConnection && (
+                        <div className="absolute right-2.5 top-2.5 text-[9px] text-indigo-500/60 font-bold uppercase">
+                          URI
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <div className="space-y-1.5">
@@ -1392,55 +1623,93 @@ export default function DashboardPage() {
                   </div>
 
                   {/* List of configuration printers */}
-                  <div className="bg-slate-900 p-8 rounded-2xl border border-slate-800 shadow-xl flex flex-col flex-1 overflow-hidden max-h-[350px]">
-                    <div className="flex items-center gap-2 pb-4 border-b border-slate-800 mb-4">
-                      <Printer className="h-5 w-5 text-indigo-400" />
-                      <h3 className="font-bold text-white text-md">Cấu hình máy in hệ thống</h3>
+                  <div className="bg-slate-900 p-8 rounded-2xl border border-slate-800 shadow-xl flex flex-col flex-1 overflow-hidden max-h-[420px]">
+                    <div className="flex items-center justify-between pb-4 border-b border-slate-800 mb-4">
+                      <div className="flex items-center gap-2">
+                        <Printer className="h-5 w-5 text-indigo-400" />
+                        <h3 className="font-bold text-white text-md">Cấu hình máy in hệ thống</h3>
+                      </div>
+                      <span className="text-[10px] text-slate-500">{printers.length} máy in</span>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+                    <div className="flex-1 overflow-y-auto space-y-3 pr-1">
                       {printers.length === 0 ? (
                         <span className="text-slate-500 text-xs italic">Hệ thống chưa có máy in cấu hình...</span>
                       ) : (
-                        printers.map((p) => (
-                          <div key={p.id} className="p-4 bg-slate-950 rounded-xl border border-slate-800 flex justify-between items-center hover:border-slate-700 transition-colors">
-                            <div>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-bold text-xs text-white">{p.displayName}</span>
-                                <span className="bg-slate-800 text-[10px] text-slate-400 px-2 py-0.5 rounded uppercase font-semibold">
-                                  {p.name}
-                                </span>
+                        printers.map((p) => {
+                          const testR = testResults[p.id];
+                          const isTesting = testingPrinter === p.id;
+                          return (
+                            <div key={p.id} className="p-4 bg-slate-950 rounded-xl border border-slate-800 hover:border-slate-700 transition-colors">
+                              <div className="flex justify-between items-start gap-3">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    {/* Connection status dot */}
+                                    <div className={`h-2 w-2 rounded-full shrink-0 ${
+                                      isTesting ? 'bg-amber-400 animate-pulse' :
+                                      testR ? (testR.ok ? 'bg-emerald-400' : 'bg-rose-500') :
+                                      'bg-slate-600'
+                                    }`} title={testR ? (testR.ok ? `Online · ${testR.latencyMs}ms` : testR.error) : 'Chưa kiểm tra'} />
+                                    <span className="font-bold text-xs text-white">{p.displayName}</span>
+                                    <span className="bg-slate-800 text-[10px] text-slate-400 px-2 py-0.5 rounded uppercase font-semibold">
+                                      {p.name}
+                                    </span>
+                                  </div>
+                                  <div className="text-[10px] text-slate-400 mt-1.5 font-mono truncate max-w-xs md:max-w-sm">{p.connection}</div>
+                                  {p.location && <div className="text-[10px] text-slate-400 mt-1">📍 {p.location}</div>}
+                                  {/* Test result info line */}
+                                  {testR && (
+                                    <div className={`text-[10px] mt-1.5 flex items-center gap-1.5 ${
+                                      testR.ok ? 'text-emerald-400' : 'text-rose-400'
+                                    }`}>
+                                      {testR.ok ? (
+                                        <><Zap className="h-2.5 w-2.5" />
+                                        <span>{testR.status} · {testR.protocol} · {testR.latencyMs}ms{testR.model ? ` · ${testR.model}` : ''}{testR.mock ? ' · [Mock]' : ''}</span></>
+                                      ) : (
+                                        <><XCircle className="h-2.5 w-2.5" />
+                                        <span>{testR.error}</span></>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {/* Test Connection button */}
+                                  <button
+                                    onClick={() => handleTestPrinterConnection(p.id)}
+                                    disabled={isTesting}
+                                    className="px-2 py-1 rounded-lg text-[10px] font-bold transition-all border cursor-pointer disabled:opacity-50 flex items-center gap-1 bg-indigo-500/5 text-indigo-400 border-indigo-500/20 hover:bg-indigo-500/15 hover:border-indigo-500/40"
+                                    title="Kiểm tra kết nối"
+                                  >
+                                    {isTesting ? (
+                                      <Loader2 className="h-3 w-3 animate-spin" />
+                                    ) : (
+                                      <Wifi className="h-3 w-3" />
+                                    )}
+                                    {isTesting ? 'Đang test...' : 'Test'}
+                                  </button>
+                                  <button
+                                    onClick={() => startEditPrinter(p)}
+                                    className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                                      editingPrinterId === p.id 
+                                        ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/40' 
+                                        : 'text-slate-400 border-transparent hover:bg-slate-800 hover:text-white'
+                                    }`}
+                                    title="Sửa máy in"
+                                  >
+                                    <Edit className="h-3.5 w-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeletePrinter(p.id, p.displayName)}
+                                    className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg border border-transparent hover:border-rose-500/20 transition-all cursor-pointer"
+                                    title="Xóa máy in"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+                                </div>
                               </div>
-                              <div className="text-[10px] text-slate-400 mt-1.5 font-mono truncate max-w-xs md:max-w-md">{p.connection}</div>
-                              {p.location && <div className="text-[10px] text-slate-400 mt-1">📍 {p.location}</div>}
                             </div>
-                            <div className="flex items-center gap-3 shrink-0">
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                p.status === 'IDLE' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                              }`}>
-                                {p.status}
-                              </span>
-                              <button
-                                onClick={() => startEditPrinter(p)}
-                                className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
-                                  editingPrinterId === p.id 
-                                    ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/40' 
-                                    : 'text-slate-400 border-transparent hover:bg-slate-800 hover:text-white'
-                                }`}
-                                title="Sửa máy in"
-                              >
-                                <Edit className="h-3.5 w-3.5" />
-                              </button>
-                              <button
-                                onClick={() => handleDeletePrinter(p.id, p.displayName)}
-                                className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg border border-transparent hover:border-rose-500/20 transition-all cursor-pointer"
-                                title="Xóa máy in"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        ))
+                          );
+                        })
                       )}
                     </div>
                   </div>

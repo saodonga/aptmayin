@@ -119,12 +119,16 @@ function buildDeletePrinter(username: string, printerUri: string): Buffer {
   ]);
 }
 
-/** CUPS-Get-Devices (0x400B) */
+/**
+ * CUPS-Get-Devices (0x400B).
+ * NOTE: We intentionally do NOT include a device-class filter here because
+ * some CUPS versions reject the device-class operation attribute with
+ * client-error-bad-request (0x0400). Returning all devices and filtering
+ * in application code is safer.
+ */
 function buildGetDevices(username: string): Buffer {
   return Buffer.concat([
     opAttrsHeader(0x400B, nextId(), username),
-    // device-class is an operation attribute for this CUPS extension operation
-    attrStr(T_KEYWORD, 'device-class', 'local'),
     GRP_END,
   ]);
 }
@@ -137,7 +141,10 @@ interface IppResult {
   body: any;
 }
 
-/** POST an IPP packet to CUPS via HTTP and return parsed response. */
+/**
+ * POST an IPP packet to CUPS via HTTP and return parsed response.
+ * Timeout is controlled by the CUPS_TIMEOUT_MS environment variable (default 8000ms).
+ */
 async function cupsRequest(
   cupsHost: string,
   path: string,
@@ -145,6 +152,7 @@ async function cupsRequest(
 ): Promise<IppResult> {
   const [hostname, portStr] = cupsHost.split(':');
   const port = portStr ? parseInt(portStr, 10) : 631;
+  const timeoutMs = parseInt(process.env.CUPS_TIMEOUT_MS || '8000', 10);
 
   return new Promise<IppResult>((resolve, reject) => {
     const opts: http.RequestOptions = {
@@ -155,10 +163,16 @@ async function cupsRequest(
       },
     };
 
+    let settled = false;
+    const settle = (fn: () => void) => {
+      if (!settled) { settled = true; fn(); }
+    };
+
     const req = http.request(opts, (res) => {
       const chunks: Buffer[] = [];
       res.on('data', (c: Buffer) => chunks.push(c));
       res.on('end', () => {
+        clearTimeout(timer);
         const data = Buffer.concat(chunks);
         let ippStatus = -1;
         let body: any = {};
@@ -166,10 +180,19 @@ async function cupsRequest(
           ippStatus = data.readUInt16BE(2);
           try { body = (ipp as any).parse(data); } catch { /* ignore parse errors */ }
         }
-        resolve({ httpStatus: res.statusCode ?? 0, ippStatus, body });
+        settle(() => resolve({ httpStatus: res.statusCode ?? 0, ippStatus, body }));
       });
     });
-    req.on('error', reject);
+
+    req.on('error', (err) => {
+      clearTimeout(timer);
+      settle(() => reject(err));
+    });
+
+    const timer = setTimeout(() => {
+      req.destroy(new Error(`CUPS request timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
     req.write(packet);
     req.end();
   });
@@ -251,7 +274,10 @@ export async function deleteCupsPrinterQueue(name: string): Promise<boolean> {
 
 /**
  * Discover local USB / physical devices from CUPS (CUPS-Get-Devices 0x400B).
- * Returns the raw printer-attributes-tag array from the IPP response.
+ * Returns the raw printer-attributes-tag / device-attributes-tag array from the IPP response.
+ *
+ * FIX: Previously called '/' (root) – corrected to '/admin/' which is the
+ * required CUPS administration endpoint for CUPS-Get-Devices.
  */
 export async function cupsGetDevices(): Promise<any[]> {
   if (process.env.MOCK_PRINTING === 'true') return [];
@@ -259,7 +285,8 @@ export async function cupsGetDevices(): Promise<any[]> {
   const host = getCupsHost();
   console.log(`[CUPS] Get-Devices`);
   const packet = buildGetDevices(CUPS_CALLER);
-  const res    = await cupsRequest(host, '/', packet);
+  // FIXED: was '/', must be '/admin/' for CUPS administration operations
+  const res    = await cupsRequest(host, '/admin/', packet);
   console.log(`[CUPS] Get-Devices response: HTTP ${res.httpStatus}, IPP 0x${res.ippStatus.toString(16)}`);
   if (res.httpStatus >= 400) {
     throw new Error(`HTTP ${res.httpStatus} từ CUPS server`);
