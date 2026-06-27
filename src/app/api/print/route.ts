@@ -130,10 +130,13 @@ export async function POST(req: Request) {
     // Auto-rewrite cups-server to localhost to bypass docker-internal hostname
     let connUri = printer.connection;
     if (connUri.includes('cups-server:')) {
-      connUri = connUri.replace('cups-server:631', 'localhost:6315');
+      connUri = connUri.replace('cups-server:631', '127.0.0.1:6315');
       console.log(`[API Print] Rewrote connection string to: ${connUri}`);
     } else if (connUri.includes('localhost:631/')) {
-      connUri = connUri.replace('localhost:631', 'localhost:6315');
+      connUri = connUri.replace('localhost:631', '127.0.0.1:6315');
+      console.log(`[API Print] Rewrote connection string to: ${connUri}`);
+    } else if (connUri.includes('localhost:6315/')) {
+      connUri = connUri.replace('localhost:6315', '127.0.0.1:6315');
       console.log(`[API Print] Rewrote connection string to: ${connUri}`);
     }
 

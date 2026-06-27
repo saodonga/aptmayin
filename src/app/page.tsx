@@ -245,25 +245,7 @@ export default function DashboardPage() {
     }
   }, [users, session, userData]);
 
-  // Sync Connection URI whenever smart-selector fields change.
-  // IMPORTANT: Must be declared BEFORE any early return to satisfy Rules of Hooks.
-  useEffect(() => {
-    if (connProtocol === 'manual' || connProtocol === 'usb') return;
-    const ip = connIp.trim();
-    if (!ip) { setNewPrinterConnection(''); return; }
-    let uri = '';
-    if (connProtocol === 'socket') {
-      uri = `socket://${ip}:${connPort || '9100'}`;
-    } else if (connProtocol === 'lpd') {
-      uri = `lpd://${ip}/${(connPath || 'queue').replace(/^\//, '')}`;
-    } else {
-      const port = connPort || '631';
-      const path = connPath || '/ipp/print';
-      uri = `ipp://${ip}:${port}${path.startsWith('/') ? path : '/' + path}`;
-    }
-    setNewPrinterConnection(uri);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connProtocol, connIp, connPort, connPath]);
+  // (Sync Connection URI logic removed to prevent React Hook count mismatch across HMR reloads)
 
   if (status === 'loading') {
     return (
@@ -331,8 +313,9 @@ export default function DashboardPage() {
   // Action Admin: Create or Update printer
   const handlePrinterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newPrinterName || !newPrinterDisplayName || !newPrinterConnection) {
-      alert('Vui lòng điền đủ thông tin bắt buộc!');
+    const finalConnection = buildConnectionUri();
+    if (!newPrinterName || !newPrinterDisplayName || !finalConnection) {
+      alert('Vui lòng điền đủ thông tin bắt buộc (Đặc biệt là địa chỉ kết nối)!');
       return;
     }
 
@@ -347,7 +330,7 @@ export default function DashboardPage() {
         body: JSON.stringify({
           name: newPrinterName,
           displayName: newPrinterDisplayName,
-          connection: newPrinterConnection,
+          connection: finalConnection,
           isColor: newPrinterColor,
           isDuplex: newPrinterDuplex,
           location: newPrinterLocation,
