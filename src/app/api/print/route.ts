@@ -196,7 +196,7 @@ async function processAndPrintSingleFile(
     const convFormData = new FormData();
     convFormData.append('files', new Blob([new Uint8Array(fileBuffer)]), fileName);
 
-    let endpoint = `${gotenbergUrl}/forms/libreoffice/convert/pdf`;
+    let endpoint = `${gotenbergUrl}/forms/libreoffice/convert`;
     if (ext === 'html' || ext === 'md') {
       endpoint = `${gotenbergUrl}/forms/chromium/convert/html`;
       if (ext === 'md') endpoint = `${gotenbergUrl}/forms/chromium/convert/markdown`;
