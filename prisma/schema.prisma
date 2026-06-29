@@ -66,5 +66,6 @@ model PrintJob {
   savedFilePath String?  // File đính kèm để in lại
   batchId     String?    // ID nhóm để gộp các file in từ chung một file ZIP
   batchName   String?    // Tên file ZIP gốc
+  pageRange   String?    // Khoảng trang in, ví dụ: "1-5"
   createdAt   DateTime   @default(now())
 }

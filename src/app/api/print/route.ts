@@ -61,6 +61,10 @@ export async function POST(req: Request) {
     const duplex = formData.get('duplex') === 'true';
     const colorMode = (formData.get('colorMode') as string) || 'GRAY';
     const copies = parseInt((formData.get('copies') as string) || '1', 10);
+    const pageFromRaw = formData.get('pageFrom');
+    const pageToRaw = formData.get('pageTo');
+    const pageFrom = pageFromRaw ? parseInt(pageFromRaw as string, 10) : undefined;
+    const pageTo = pageToRaw ? parseInt(pageToRaw as string, 10) : undefined;
 
     if (!file || !printerId) {
       return NextResponse.json({ error: 'Thiếu thông tin file in hoặc máy in!' }, { status: 400 });
@@ -97,7 +101,9 @@ export async function POST(req: Request) {
         paperSize,
         duplex,
         colorMode,
-        copies
+        copies,
+        pageFrom,
+        pageTo
       });
 
       return NextResponse.json({ 
@@ -113,7 +119,7 @@ export async function POST(req: Request) {
         fileBuffer, 
         file.name, 
         file.type,
-        { printer, user, paperSize, duplex, colorMode, copies }
+        { printer, user, paperSize, duplex, colorMode, copies, pageFrom, pageTo }
       );
 
       if (result.error) {
@@ -186,11 +192,11 @@ async function processAndPrintSingleFile(
   originalBuffer: Buffer, 
   fileName: string, 
   mimeType: string, 
-  config: { printer: Printer; user: User; paperSize: string; duplex: boolean; colorMode: string; copies: number }
+  config: { printer: Printer; user: User; paperSize: string; duplex: boolean; colorMode: string; copies: number; pageFrom?: number; pageTo?: number; batchId?: string; batchName?: string }
 ): Promise<{ success: boolean; jobId?: string; error?: string; status?: number; mock?: boolean }> {
   let fileBuffer = originalBuffer;
   let isPdf = mimeType === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf');
-  const { printer, user, paperSize, duplex, colorMode, copies } = config;
+  const { printer, user, paperSize, duplex, colorMode, copies, pageFrom, pageTo } = config;
 
   // 1. Chuyển đổi file qua Gotenberg nếu không phải PDF
   if (!isPdf) {
@@ -231,12 +237,24 @@ async function processAndPrintSingleFile(
 
   // 2. Tính toán số trang (bây giờ fileBuffer chắc chắn là PDF)
   let pageCount = 1;
+  let originalPageCount = 1;
   if (isPdf) {
     try {
       const pdfDoc = await PDFDocument.load(fileBuffer);
-      pageCount = pdfDoc.getPageCount();
+      originalPageCount = pdfDoc.getPageCount();
+      pageCount = originalPageCount;
     } catch (pdfError) {
       console.error('Lỗi đọc số trang PDF:', pdfError);
+    }
+  }
+
+  let pageRangeString = null;
+  if (pageFrom && pageTo) {
+    const pFrom = Math.max(1, pageFrom);
+    const pTo = Math.min(originalPageCount, pageTo);
+    if (pTo >= pFrom) {
+      pageCount = pTo - pFrom + 1;
+      pageRangeString = `${pFrom}-${pTo}`;
     }
   }
 
@@ -280,6 +298,7 @@ async function processAndPrintSingleFile(
       savedFilePath: savedFilePath,
       batchId: config.batchId || null,
       batchName: config.batchName || null,
+      pageRange: pageRangeString,
     },
   });
 
@@ -305,7 +324,7 @@ async function processAndPrintSingleFile(
   else if (connUri.includes('127.0.0.1:6315/')) connUri = connUri.replace('127.0.0.1:6315', targetHost);
 
   const cupsPrinter = ipp.Printer(connUri);
-  const ippMsg = {
+  const ippMsg: any = {
     'operation-attributes-tag': {
       'requesting-user-name': user.email,
       'document-format': 'application/pdf',
@@ -318,6 +337,11 @@ async function processAndPrintSingleFile(
     },
     data: fileBuffer,
   };
+
+  if (pageRangeString) {
+    const parts = pageRangeString.split('-');
+    ippMsg['job-attributes-tag']['page-ranges'] = [[parseInt(parts[0], 10), parseInt(parts[1], 10)]];
+  }
 
   const printResult = await new Promise<{ success: boolean; error?: string }>((resolve) => {
     cupsPrinter.execute('Print-Job', ippMsg, (err: any, res: any) => {

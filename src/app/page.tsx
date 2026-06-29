@@ -111,6 +111,8 @@ export default function DashboardPage() {
   const [duplex, setDuplex] = useState<boolean>(true);
   const [colorMode, setColorMode] = useState<string>('GRAY');
   const [copies, setCopies] = useState<number>(1);
+  const [pageFrom, setPageFrom] = useState<string>('');
+  const [pageTo, setPageTo] = useState<string>('');
 
   // Admin Form States
   const [newPrinterName, setNewPrinterName] = useState('');
@@ -367,6 +369,8 @@ export default function DashboardPage() {
     formData.append('duplex', String(duplex));
     formData.append('colorMode', colorMode);
     formData.append('copies', String(copies));
+    if (pageFrom) formData.append('pageFrom', pageFrom);
+    if (pageTo) formData.append('pageTo', pageTo);
 
     try {
       const res = await fetch('/api/print', {
@@ -1111,6 +1115,33 @@ export default function DashboardPage() {
                         max="20"
                         value={copies}
                         onChange={(e) => setCopies(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-indigo-500 text-slate-200 transition-colors"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Page Range grid */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Từ trang</label>
+                      <input
+                        type="number"
+                        min="1"
+                        placeholder="VD: 1"
+                        value={pageFrom}
+                        onChange={(e) => setPageFrom(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-indigo-500 text-slate-200 transition-colors"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Đến trang</label>
+                      <input
+                        type="number"
+                        min="1"
+                        placeholder="VD: 5"
+                        value={pageTo}
+                        onChange={(e) => setPageTo(e.target.value)}
                         className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-indigo-500 text-slate-200 transition-colors"
                       />
                     </div>
