@@ -224,7 +224,19 @@ export async function ensureCupsPrinterQueue(name: string, connection: string): 
   if (process.env.MOCK_PRINTING === 'true') return targetUri;
 
   const isIppProto = /^(ipp|ipps|http|https):\/\//.test(connection);
-  const ppdName    = isIppProto ? 'everywhere' : 'raw';
+  let ppdName = 'raw';
+
+  if (isIppProto) {
+    ppdName = 'everywhere'; // Driverless IPP
+  } else {
+    // Tự động suy luận driver cho USB / Socket (không dùng raw vì raw không xử lý được file PDF)
+    const lowerName = (name + connection).toLowerCase();
+    if (lowerName.includes('laserjet') || lowerName.includes('hp')) {
+      ppdName = 'drv:///sample.drv/laserjet.ppd'; // Generic PCL cho HP
+    } else {
+      ppdName = 'drv:///sample.drv/generic.ppd';  // Generic PostScript
+    }
+  }
 
   try {
     const host = getCupsHost();
