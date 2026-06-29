@@ -40,12 +40,17 @@ async function testConnection(rawUri: string): Promise<TestResult> {
   const t0 = Date.now();
   const timeoutMs = 6000;
 
-  // Auto-rewrite cups-server to localhost:6315 to bypass docker-internal hostname in dev mode
+  const targetHost = process.env.CUPS_SERVER_HOST || 'cups-server:631';
   let connectionUri = rawUri;
-  if (connectionUri.includes('cups-server:')) {
-    connectionUri = connectionUri.replace('cups-server:631', 'localhost:6315');
+  
+  if (connectionUri.includes('cups-server:631')) {
+    connectionUri = connectionUri.replace('cups-server:631', targetHost);
   } else if (connectionUri.includes('localhost:631/')) {
-    connectionUri = connectionUri.replace('localhost:631', 'localhost:6315');
+    connectionUri = connectionUri.replace('localhost:631', targetHost);
+  } else if (connectionUri.includes('localhost:6315/')) {
+    connectionUri = connectionUri.replace('localhost:6315', targetHost);
+  } else if (connectionUri.includes('127.0.0.1:6315/')) {
+    connectionUri = connectionUri.replace('127.0.0.1:6315', targetHost);
   }
 
   try {

@@ -127,16 +127,21 @@ export async function POST(req: Request) {
     console.log(`[API Print] Initiating Print-Job for printer ${printer.name}`);
     console.log(`[API Print] Connection string from DB: ${printer.connection}`);
     
-    // Auto-rewrite cups-server to localhost to bypass docker-internal hostname
+    const targetHost = process.env.CUPS_SERVER_HOST || 'cups-server:631';
     let connUri = printer.connection;
-    if (connUri.includes('cups-server:')) {
-      connUri = connUri.replace('cups-server:631', '127.0.0.1:6315');
+    
+    // Rewrite connection string dynamically based on environment config
+    if (connUri.includes('cups-server:631')) {
+      connUri = connUri.replace('cups-server:631', targetHost);
       console.log(`[API Print] Rewrote connection string to: ${connUri}`);
     } else if (connUri.includes('localhost:631/')) {
-      connUri = connUri.replace('localhost:631', '127.0.0.1:6315');
+      connUri = connUri.replace('localhost:631', targetHost);
       console.log(`[API Print] Rewrote connection string to: ${connUri}`);
     } else if (connUri.includes('localhost:6315/')) {
-      connUri = connUri.replace('localhost:6315', '127.0.0.1:6315');
+      connUri = connUri.replace('localhost:6315', targetHost);
+      console.log(`[API Print] Rewrote connection string to: ${connUri}`);
+    } else if (connUri.includes('127.0.0.1:6315/')) {
+      connUri = connUri.replace('127.0.0.1:6315', targetHost);
       console.log(`[API Print] Rewrote connection string to: ${connUri}`);
     }
 
