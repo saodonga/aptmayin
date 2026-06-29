@@ -10,10 +10,24 @@ services:
       - "8028:3500"
     env_file:
       - .env
+    environment:
+      - GOTENBERG_URL=http://gotenberg:3000
     volumes:
       - temp-print-files:/app/temp
     depends_on:
       - cups-server
+      - gotenberg
+
+  # 1.5. Chuyển đổi định dạng văn bản sang PDF (Office, TXT, HTML)
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    container_name: printer_gotenberg
+    restart: always
+    ports:
+      - "3000:3000"
+    command:
+      - "gotenberg"
+      - "--api-port=3000"
 
   # 2. CUPS Print Server (Đầu não kết nối máy in USB và máy in mạng)
   cups-server:

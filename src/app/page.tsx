@@ -251,8 +251,22 @@ export default function DashboardPage() {
     }
   }, [users, session, userData]);
 
-  // (Sync Connection URI logic removed to prevent React Hook count mismatch across HMR reloads)
-
+  // Sync Connection URI logic
+  useEffect(() => {
+    if (editingPrinterId || connProtocol === 'manual' || connProtocol === 'usb') return;
+    const ip = connIp.trim();
+    if (!ip) { setNewPrinterConnection(''); return; }
+    
+    if (connProtocol === 'socket') {
+      setNewPrinterConnection(`socket://${ip}:${connPort || '9100'}`);
+    } else if (connProtocol === 'lpd') {
+      setNewPrinterConnection(`lpd://${ip}/${(connPath || 'queue').replace(/^\//, '')}`);
+    } else if (connProtocol === 'ipp') {
+      const port = connPort || '631';
+      const path = connPath || '/ipp/print';
+      setNewPrinterConnection(`ipp://${ip}:${port}${path.startsWith('/') ? path : '/' + path}`);
+    }
+  }, [connProtocol, connIp, connPort, connPath, editingPrinterId]);
   if (status === 'loading') {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-100">
@@ -1488,14 +1502,19 @@ export default function DashboardPage() {
                     <div className="relative">
                       <input
                         type="text"
-                        required
+                        required={connProtocol === 'manual'}
+                        readOnly={connProtocol !== 'manual'}
                         placeholder="vd: ipp://10.100.0.200:631/ipp/print"
                         value={newPrinterConnection}
                         onChange={(e) => {
                           setNewPrinterConnection(e.target.value);
                           if (!editingPrinterId) setConnProtocol('manual');
                         }}
-                        className="w-full bg-slate-950 border border-indigo-500/30 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-indigo-500 text-indigo-300 font-mono"
+                        className={`w-full border rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-indigo-500 font-mono transition-all ${
+                          connProtocol !== 'manual' 
+                            ? 'bg-slate-900/50 border-slate-800 text-slate-500 cursor-not-allowed'
+                            : 'bg-slate-950 border-indigo-500/30 text-indigo-300'
+                        }`}
                       />
                       {newPrinterConnection && (
                         <div className="absolute right-2.5 top-2.5 text-[9px] text-indigo-500/60 font-bold uppercase">
