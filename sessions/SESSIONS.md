@@ -19,6 +19,7 @@
 | [2026-06-16](file:///d:/AnhPT/Code/Mayintuxa/sessions/2026-06-16.md) | #1 | Khởi tạo Next.js, cài đặt Prisma Neon DB, phân quyền NextAuth, viết APIs in ấn & quản trị admin, tạo tài liệu Docs và push Git. | Lỗi require-time của ipp, dynamic params của Next.js 15+. | ✅ |
 | [2026-06-25](file:///d:/AnhPT/Code/Mayintuxa/sessions/2026-06-25.md) | #2 | Nâng cấp cấu trúc Next.js 16 (Middleware sang Proxy), cấu hình Google OAuth và Neon DB thành công. | Không có. | ✅ |
 | [2026-06-25](file:///d:/AnhPT/Code/Mayintuxa/sessions/2026-06-25.md) | #3 | Fix `Unknown attribute: device-uri` (rewrite IPP binary thủ công RFC 2910), fix HTTP 401 CUPS (cupsd.conf no-auth), thêm PWA (manifest + SW + icons), đổi tên app MayInKTS. | ipp library không biết CUPS extensions; CUPS PAM auth block. | ✅ |
+| [2026-06-27](file:///d:/AnhPT/Code/Mayintuxa/sessions/2026-06-27.md) | #4 | (Đa dự án) Fix OSIRIS (lỗi React hook + CartoCDN), Fix Mayintuxa lỗi HMR Hook mismatch và lỗi CUPS IPv6 AggregateError. Push thành công. | React Hooks desync do HMR; AggregateError do IPv6 vs IPv4 phân giải localhost | ✅ |
 
 ---
 
@@ -39,4 +40,5 @@
 - **2026-06-16:** Sử dụng Prisma 6 thay vì Prisma 7 để giữ cấu trúc schema truyền thống đơn giản, ổn định.
 - **2026-06-16:** Tự phát triển các biểu đồ SVG dạng thô để tối ưu hóa bundle size và loại bỏ xung đột thư viện chart.
 - **2026-06-16:** Thêm biến môi trường `MOCK_PRINTING` để giả lập lệnh in khi máy in thực tế chưa trực tuyến.
-
+- **2026-06-27:** Gỡ bỏ `useEffect` lưu Connection URI để fix dứt điểm lỗi React HMR hook count mismatch cho user mà không cần Hard Reload, chuyển sang build inline lúc submit.
+- **2026-06-27:** Bắt buộc Node.js gọi CUPS qua IPv4 (`127.0.0.1:6315` thay vì `localhost:6315`) để tránh lỗi Node 18 AggregateError phân giải IPv6/IPv4 trên môi trường Docker của Windows.

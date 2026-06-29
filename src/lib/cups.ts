@@ -157,6 +157,7 @@ async function cupsRequest(
   return new Promise<IppResult>((resolve, reject) => {
     const opts: http.RequestOptions = {
       hostname, port, path, method: 'POST',
+      family: 4, // Force IPv4 to prevent AggregateError in Node 18+ (IPv6 try first)
       headers: {
         'Content-Type': 'application/ipp',
         'Content-Length': packet.length,
