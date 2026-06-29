@@ -56,13 +56,53 @@ export async function POST(req: Request) {
 
     // Đọc Buffer của file
     const arrayBuffer = await file.arrayBuffer();
-    const fileBuffer = Buffer.from(arrayBuffer);
+    let fileBuffer = Buffer.from(arrayBuffer);
+    let isPdf = file.type === 'application/pdf' || file.name.endsWith('.pdf');
+
+    // Chuyển đổi file nếu không phải PDF (dùng Gotenberg)
+    if (!isPdf) {
+      console.log(`[API Print] Converting ${file.name} to PDF via Gotenberg...`);
+      const gotenbergUrl = process.env.GOTENBERG_URL || 'http://gotenberg:3000';
+      const ext = file.name.split('.').pop()?.toLowerCase();
+      
+      const convFormData = new FormData();
+      // append the file as a Blob with the original name
+      convFormData.append('files', new Blob([fileBuffer]), file.name);
+
+      let endpoint = `${gotenbergUrl}/forms/libreoffice/convert/pdf`;
+      // Nếu là html, markdown
+      if (ext === 'html' || ext === 'md') {
+        endpoint = `${gotenbergUrl}/forms/chromium/convert/html`;
+        if (ext === 'md') endpoint = `${gotenbergUrl}/forms/chromium/convert/markdown`;
+      }
+
+      try {
+        const convRes = await fetch(endpoint, {
+          method: 'POST',
+          body: convFormData,
+        });
+
+        if (!convRes.ok) {
+          const errText = await convRes.text();
+          console.error(`[API Print] Gotenberg error: ${errText}`);
+          return NextResponse.json({ error: 'Lỗi khi chuyển đổi file sang PDF!' }, { status: 500 });
+        }
+
+        const pdfArrayBuffer = await convRes.arrayBuffer();
+        fileBuffer = Buffer.from(pdfArrayBuffer);
+        isPdf = true;
+        console.log(`[API Print] Successfully converted ${file.name} to PDF (${fileBuffer.length} bytes)`);
+      } catch (convErr) {
+        console.error('[API Print] Gotenberg connection error:', convErr);
+        return NextResponse.json({ error: 'Không thể kết nối đến máy chủ chuyển đổi file (Gotenberg)!' }, { status: 500 });
+      }
+    }
 
     // Tính toán số trang (Hỗ trợ PDF qua pdf-lib, các loại khác mặc định 1 trang)
     let pageCount = 1;
-    if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+    if (isPdf) {
       try {
-        const pdfDoc = await PDFDocument.load(arrayBuffer);
+        const pdfDoc = await PDFDocument.load(fileBuffer);
         pageCount = pdfDoc.getPageCount();
       } catch (pdfError) {
         console.error('Lỗi đọc số trang PDF:', pdfError);
@@ -88,12 +128,13 @@ export async function POST(req: Request) {
     }
 
     // Tạo bản ghi log in ở trạng thái PROCESSING
+    // Đối với file đã convert, lưu tên file gốc để lịch sử hiển thị đúng
     const job = await db.printJob.create({
       data: {
         userId: user.id,
         printerId: printer.id,
         fileName: file.name,
-        fileSize: file.size,
+        fileSize: fileBuffer.length,
         pageCount: pageCount,
         copies: copies,
         totalPages: totalPages,
@@ -149,7 +190,7 @@ export async function POST(req: Request) {
     const ippMsg = {
       'operation-attributes-tag': {
         'requesting-user-name': user.email,
-        'document-format': file.type || 'application/pdf',
+        'document-format': 'application/pdf',
       },
       'job-attributes-tag': {
         media: paperSize === 'A3' ? 'iso_a3_297x420mm' : 'iso_a4_210x297mm',
