@@ -2,7 +2,7 @@
 
 import { useSession, signOut } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { 
   Printer, 
   History, 
@@ -32,7 +32,11 @@ import {
   Zap,
   Globe,
   Network,
-  Cable
+  Cable,
+  Monitor,
+  Archive,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react';
 
 interface PrintJob {
@@ -49,6 +53,9 @@ interface PrintJob {
   colorMode: string;
   status: string;
   errorLog?: string;
+  savedFilePath?: string;
+  batchId?: string;
+  batchName?: string;
   createdAt: string;
   user?: {
     name: string;
@@ -93,6 +100,7 @@ export default function DashboardPage() {
   const [printers, setPrinters] = useState<PrinterConfig[]>([]);
   const [history, setHistory] = useState<PrintJob[]>([]);
   const [historySearchQuery, setHistorySearchQuery] = useState('');
+  const [expandedBatches, setExpandedBatches] = useState<Record<string, boolean>>({});
   const [users, setUsers] = useState<UserConfig[]>([]);
   const [userData, setUserData] = useState<{ pagesPrinted: number; pageQuota: number } | null>(null);
 
@@ -242,18 +250,23 @@ export default function DashboardPage() {
     }
   }, [status, session, router]);
 
-  // Handle auto fallback of user quota if users list isn't fetched yet
+  // Sync userData whenever users list updates (without infinite loop)
   useEffect(() => {
-    if (users.length > 0 && session?.user?.id && !userData) {
+    if (users.length > 0 && session?.user?.id) {
       const currentUser = users.find(u => u.id === session.user.id);
       if (currentUser) {
-        setUserData({
-          pagesPrinted: currentUser.pagesPrinted,
-          pageQuota: currentUser.pageQuota
+        setUserData(prev => {
+          if (prev?.pagesPrinted === currentUser.pagesPrinted && prev?.pageQuota === currentUser.pageQuota) {
+            return prev;
+          }
+          return {
+            pagesPrinted: currentUser.pagesPrinted,
+            pageQuota: currentUser.pageQuota
+          };
         });
       }
     }
-  }, [users, session, userData]);
+  }, [users, session]);
 
   // Sync Connection URI logic
   useEffect(() => {
@@ -312,6 +325,30 @@ export default function DashboardPage() {
     }
   };
 
+  const handleReprintBatch = async (batchId: string) => {
+    if (!confirm('Bạn có muốn in lại toàn bộ các file trong nhóm này không?')) return;
+    setLoading(true);
+    setSubmitMessage(null);
+    try {
+      const res = await fetch('/api/print/reprint-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batchId }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSubmitMessage({ type: 'success', text: data.message || 'Đã gửi lệnh in lại hàng loạt!' });
+        fetchData();
+        if (session?.user?.role === 'ADMIN') fetchUsers();
+      } else {
+        setSubmitMessage({ type: 'error', text: data.error || 'Lỗi hệ thống khi in lại nhóm!' });
+      }
+    } catch (e) {
+      setSubmitMessage({ type: 'error', text: 'Không thể kết nối đến máy chủ!' });
+    } finally {
+      setLoading(false);
+    }
+  };
 // Action: Print Submission
   const handlePrintSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -768,6 +805,42 @@ export default function DashboardPage() {
   const quotaLimit = userData?.pageQuota ?? 100;
   const quotaPercent = Math.min(Math.round((quotaUsed / quotaLimit) * 100), 100);
 
+  const toggleBatch = (batchId: string) => {
+    setExpandedBatches(prev => ({ ...prev, [batchId]: !prev[batchId] }));
+  };
+
+  const processedHistory = useMemo(() => {
+    const filtered = history.filter(job => job.fileName.toLowerCase().includes(historySearchQuery.toLowerCase()));
+    
+    const groups: Record<string, { batchName: string; totalPages: number; jobs: PrintJob[]; createdAt: string; status: string; user: any }> = {};
+    const result: any[] = [];
+
+    filtered.forEach(job => {
+      if (job.batchId) {
+        if (!groups[job.batchId]) {
+          groups[job.batchId] = {
+            batchName: job.batchName || 'Nhóm ZIP',
+            totalPages: 0,
+            jobs: [],
+            createdAt: job.createdAt,
+            status: 'SUCCESS', // Assume success
+            user: job.user
+          };
+          result.push({ isGroupHeader: true, batchId: job.batchId, data: groups[job.batchId] });
+        }
+        groups[job.batchId].jobs.push(job);
+        groups[job.batchId].totalPages += job.totalPages;
+        
+        if (job.status === 'PROCESSING') groups[job.batchId].status = 'PROCESSING';
+        else if (job.status === 'FAILED' && groups[job.batchId].status !== 'PROCESSING') groups[job.batchId].status = 'FAILED';
+      } else {
+        result.push({ isGroupHeader: false, job });
+      }
+    });
+
+    return result;
+  }, [history, historySearchQuery]);
+
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden relative w-full">
       {/* Mobile Menu Button */}
@@ -952,7 +1025,7 @@ export default function DashboardPage() {
                         ref={fileInputRef} 
                         onChange={handleFileChange} 
                         className="hidden" 
-                        accept=".pdf,.png,.jpg,.jpeg,.docx,.xlsx" 
+                        accept=".pdf,.png,.jpg,.jpeg,.docx,.xlsx,.zip,.tar" 
                       />
                       <div className="p-3 bg-slate-800 rounded-xl text-slate-400 group-hover:text-indigo-400 group-hover:bg-indigo-500/5 border border-slate-800/80 transition-colors mb-3">
                         <Upload className="h-6 w-6" />
@@ -1188,74 +1261,183 @@ export default function DashboardPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/80">
-                      {history.filter(job => job.fileName.toLowerCase().includes(historySearchQuery.toLowerCase())).length === 0 ? (
+                      {processedHistory.length === 0 ? (
                         <tr>
                           <td colSpan={10} className="p-8 text-center text-slate-400 text-sm">
                             Không tìm thấy file nào khớp với từ khóa "{historySearchQuery}"
                           </td>
                         </tr>
-                      ) : history.filter(job => job.fileName.toLowerCase().includes(historySearchQuery.toLowerCase())).map((job) => (
-                        <tr key={job.id} className="hover:bg-slate-850/40 transition-colors">
-                          {session?.user?.role === 'ADMIN' && (
-                            <td className="p-4">
-                              <div className="text-xs font-semibold text-white">{job.user?.name || 'Vô danh'}</div>
-                              <div className="text-[10px] text-slate-400 mt-0.5">{job.user?.email}</div>
-                            </td>
-                          )}
-                          <td className="p-4 font-medium text-xs max-w-xs truncate text-indigo-200" title={job.fileName}>
-                            <div className="flex items-center gap-2">
-                              <FileText className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                              <span className="truncate">{job.fileName}</span>
-                            </div>
-                          </td>
-                          <td className="p-4 text-xs text-slate-300">{job.printer?.displayName}</td>
-                          <td className="p-4 text-xs text-center text-slate-300">{job.paperSize}</td>
-                          <td className="p-4 text-xs text-center">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              job.duplex ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'bg-slate-800 text-slate-400'
-                            }`}>
-                              {job.duplex ? '2 mặt' : '1 mặt'}
-                            </span>
-                          </td>
-                          <td className="p-4 text-xs text-center">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              job.colorMode === 'COLOR' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-slate-800 text-slate-400'
-                            }`}>
-                              {job.colorMode === 'COLOR' ? 'Màu' : 'Đen trắng'}
-                            </span>
-                          </td>
-                          <td className="p-4 text-xs text-center text-white font-semibold">{job.totalPages}</td>
-                          <td className="p-4 text-xs text-center">
-                            <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold ${
-                              job.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                              job.status === 'FAILED' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
-                              'bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse'
-                            }`}>
-                              {job.status === 'SUCCESS' && 'Thành công'}
-                              {job.status === 'FAILED' && 'Thất bại'}
-                              {job.status === 'PROCESSING' && 'Đang xử lý'}
-                            </span>
-                          </td>
-                          <td className="p-4 text-xs text-right text-slate-400">
-                            {new Date(job.createdAt).toLocaleString('vi-VN', {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                              day: '2-digit',
-                              month: '2-digit',
-                            })}
-                          </td>
-                          <td className="p-4 text-xs text-right">
-                            <button
-                              onClick={() => handleReprint(job.id)}
-                              disabled={loading || job.status === 'PROCESSING'}
-                              className="p-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded transition-colors disabled:opacity-50 inline-flex items-center gap-1"
-                              title="In lại file này"
-                            >
-                              <Repeat className="w-3.5 h-3.5" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
+                      ) : processedHistory.map((item) => {
+                        if (item.isGroupHeader) {
+                          const group = item.data;
+                          const isExpanded = expandedBatches[item.batchId];
+                          return (
+                            <React.Fragment key={`group-${item.batchId}`}>
+                              <tr className="bg-slate-900/80 hover:bg-slate-850/60 transition-colors border-b-2 border-slate-800">
+                                {session?.user?.role === 'ADMIN' && (
+                                  <td className="p-4">
+                                    <div className="text-xs font-semibold text-white">{group.user?.name || 'Vô danh'}</div>
+                                    <div className="text-[10px] text-slate-400 mt-0.5">{group.user?.email}</div>
+                                  </td>
+                                )}
+                                <td className="p-4 font-bold text-xs max-w-xs truncate text-indigo-300 cursor-pointer" onClick={() => toggleBatch(item.batchId)}>
+                                  <div className="flex items-center gap-2">
+                                    <button className="p-0.5 bg-slate-800 rounded text-slate-400 hover:text-white">
+                                      {isExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                                    </button>
+                                    <Archive className="h-4 w-4 text-indigo-400 shrink-0" />
+                                    <span className="truncate">{group.batchName}</span>
+                                    <span className="px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-300 text-[9px] font-bold">{group.jobs.length} file</span>
+                                  </div>
+                                </td>
+                                <td colSpan={4} className="p-4 text-xs text-slate-400 italic cursor-pointer" onClick={() => toggleBatch(item.batchId)}>
+                                  (Nhóm file nén)
+                                </td>
+                                <td className="p-4 text-xs text-center text-white font-bold">{group.totalPages}</td>
+                                <td className="p-4 text-xs text-center">
+                                  <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                                    group.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                                    group.status === 'FAILED' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
+                                    'bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse'
+                                  }`}>
+                                    {group.status === 'SUCCESS' && 'Hoàn tất'}
+                                    {group.status === 'FAILED' && 'Lỗi một phần'}
+                                    {group.status === 'PROCESSING' && 'Đang in...'}
+                                  </span>
+                                </td>
+                                <td className="p-4 text-xs text-right text-slate-400">
+                                  {new Date(group.createdAt).toLocaleString('vi-VN', {
+                                    hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit'
+                                  })}
+                                </td>
+                                <td className="p-4 text-xs text-right">
+                                  <button
+                                    onClick={() => handleReprintBatch(item.batchId)}
+                                    disabled={loading || group.status === 'PROCESSING'}
+                                    className="p-1.5 px-2 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 font-bold rounded transition-colors disabled:opacity-50 inline-flex items-center gap-1 border border-indigo-500/30"
+                                    title="In lại toàn bộ nhóm này"
+                                  >
+                                    <Repeat className="w-3.5 h-3.5" /> In nhóm
+                                  </button>
+                                </td>
+                              </tr>
+                              {isExpanded && group.jobs.map((job: PrintJob) => (
+                                <tr key={job.id} className="hover:bg-slate-850/40 transition-colors bg-slate-950/40 border-l-2 border-l-indigo-500/30">
+                                  {session?.user?.role === 'ADMIN' && <td className="p-4"></td>}
+                                  <td className="p-4 font-medium text-xs max-w-xs truncate text-indigo-200/80 pl-8" title={job.fileName}>
+                                    <div className="flex items-center gap-2">
+                                      <FileText className="h-3 w-3 text-slate-500 shrink-0" />
+                                      <span className="truncate">{job.fileName}</span>
+                                    </div>
+                                  </td>
+                                  <td className="p-4 text-xs text-slate-400">{job.printer?.displayName}</td>
+                                  <td className="p-4 text-xs text-center text-slate-400">{job.paperSize}</td>
+                                  <td className="p-4 text-xs text-center">
+                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                      job.duplex ? 'bg-indigo-500/5 text-indigo-400/70 border border-indigo-500/10' : 'bg-slate-800/50 text-slate-500'
+                                    }`}>
+                                      {job.duplex ? '2 mặt' : '1 mặt'}
+                                    </span>
+                                  </td>
+                                  <td className="p-4 text-xs text-center">
+                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                      job.colorMode === 'COLOR' ? 'bg-amber-500/5 text-amber-400/70 border border-amber-500/10' : 'bg-slate-800/50 text-slate-500'
+                                    }`}>
+                                      {job.colorMode === 'COLOR' ? 'Màu' : 'Đen trắng'}
+                                    </span>
+                                  </td>
+                                  <td className="p-4 text-xs text-center text-slate-300 font-semibold">{job.totalPages}</td>
+                                  <td className="p-4 text-xs text-center">
+                                    <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                                      job.status === 'SUCCESS' ? 'bg-emerald-500/5 text-emerald-400/70 border border-emerald-500/10' :
+                                      job.status === 'FAILED' ? 'bg-rose-500/5 text-rose-400/70 border border-rose-500/10' :
+                                      'bg-amber-500/5 text-amber-400/70 border border-amber-500/10 animate-pulse'
+                                    }`}>
+                                      {job.status === 'SUCCESS' && 'Thành công'}
+                                      {job.status === 'FAILED' && 'Thất bại'}
+                                      {job.status === 'PROCESSING' && 'Đang in...'}
+                                    </span>
+                                  </td>
+                                  <td className="p-4 text-xs text-right text-slate-500">
+                                    {new Date(job.createdAt).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                                  </td>
+                                  <td className="p-4 text-xs text-right">
+                                    <button
+                                      onClick={() => handleReprint(job.id)}
+                                      disabled={loading || job.status === 'PROCESSING'}
+                                      className="p-1.5 bg-indigo-500/5 hover:bg-indigo-500/10 text-indigo-400/70 rounded transition-colors disabled:opacity-50 inline-flex items-center gap-1"
+                                      title="In lại file này"
+                                    >
+                                      <Repeat className="w-3 h-3" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </React.Fragment>
+                          );
+                        } else {
+                          const job = item.job;
+                          return (
+                            <tr key={job.id} className="hover:bg-slate-850/40 transition-colors">
+                              {session?.user?.role === 'ADMIN' && (
+                                <td className="p-4">
+                                  <div className="text-xs font-semibold text-white">{job.user?.name || 'Vô danh'}</div>
+                                  <div className="text-[10px] text-slate-400 mt-0.5">{job.user?.email}</div>
+                                </td>
+                              )}
+                              <td className="p-4 font-medium text-xs max-w-xs truncate text-indigo-200" title={job.fileName}>
+                                <div className="flex items-center gap-2">
+                                  <FileText className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                                  <span className="truncate">{job.fileName}</span>
+                                </div>
+                              </td>
+                              <td className="p-4 text-xs text-slate-300">{job.printer?.displayName}</td>
+                              <td className="p-4 text-xs text-center text-slate-300">{job.paperSize}</td>
+                              <td className="p-4 text-xs text-center">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  job.duplex ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'bg-slate-800 text-slate-400'
+                                }`}>
+                                  {job.duplex ? '2 mặt' : '1 mặt'}
+                                </span>
+                              </td>
+                              <td className="p-4 text-xs text-center">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  job.colorMode === 'COLOR' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-slate-800 text-slate-400'
+                                }`}>
+                                  {job.colorMode === 'COLOR' ? 'Màu' : 'Đen trắng'}
+                                </span>
+                              </td>
+                              <td className="p-4 text-xs text-center text-white font-semibold">{job.totalPages}</td>
+                              <td className="p-4 text-xs text-center">
+                                <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold ${
+                                  job.status === 'SUCCESS' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                                  job.status === 'FAILED' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
+                                  'bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse'
+                                }`}>
+                                  {job.status === 'SUCCESS' && 'Thành công'}
+                                  {job.status === 'FAILED' && 'Thất bại'}
+                                  {job.status === 'PROCESSING' && 'Đang xử lý'}
+                                </span>
+                              </td>
+                              <td className="p-4 text-xs text-right text-slate-400">
+                                {new Date(job.createdAt).toLocaleString('vi-VN', {
+                                  hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit'
+                                })}
+                              </td>
+                              <td className="p-4 text-xs text-right">
+                                <button
+                                  onClick={() => handleReprint(job.id)}
+                                  disabled={loading || job.status === 'PROCESSING'}
+                                  className="p-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded transition-colors disabled:opacity-50 inline-flex items-center gap-1"
+                                  title="In lại file này"
+                                >
+                                  <Repeat className="w-3.5 h-3.5" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        }
+                      })}
                     </tbody>
                   </table>
                 </div>

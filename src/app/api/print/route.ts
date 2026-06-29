@@ -140,7 +140,12 @@ async function processZipInBackground(zipBuffer: Buffer, zipName: string, config
     // Lọc ra các file hợp lệ (bỏ qua thư mục và file ẩn như .DS_Store)
     const validEntries = zipEntries.filter(entry => !entry.isDirectory && !entry.entryName.includes('__MACOSX') && !entry.name.startsWith('.'));
 
-    console.log(`[ZIP Process] Bắt đầu xử lý ${validEntries.length} file từ ${zipName}`);
+    const crypto = require('crypto');
+    const batchId = crypto.randomUUID();
+    config.batchId = batchId;
+    config.batchName = zipName;
+
+    console.log(`[ZIP Process] Bắt đầu xử lý ${validEntries.length} file từ ${zipName} (Batch: ${batchId})`);
 
     for (let i = 0; i < validEntries.length; i++) {
       const entry = validEntries[i];
@@ -273,6 +278,8 @@ async function processAndPrintSingleFile(
       colorMode: colorMode,
       status: JobStatus.PROCESSING,
       savedFilePath: savedFilePath,
+      batchId: config.batchId || null,
+      batchName: config.batchName || null,
     },
   });
 
