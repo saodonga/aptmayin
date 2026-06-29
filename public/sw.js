@@ -1,11 +1,9 @@
-const CACHE_NAME = 'printserver-v1';
+const CACHE_NAME = 'printserver-v1.1';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       return cache.addAll([
-        '/',
-        '/login',
         '/manifest.json'
       ]);
     })
@@ -34,7 +32,16 @@ self.addEventListener('fetch', (event) => {
   
   event.respondWith(
     caches.match(event.request).then((response) => {
-      return response || fetch(event.request);
+      if (response) {
+        return response;
+      }
+      return fetch(event.request).then((networkResponse) => {
+        // Fix for "Response served by service worker has redirections" error in Safari/Chrome
+        if (networkResponse.redirected) {
+          return Response.redirect(networkResponse.url, 302);
+        }
+        return networkResponse;
+      });
     })
   );
 });
