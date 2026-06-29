@@ -15,6 +15,7 @@ services:
     volumes:
       - temp-print-files:/app/temp
       - print-data:/app/data
+      - cups-socket:/var/run/cups
     depends_on:
       - cups-server
       - gotenberg
@@ -43,6 +44,7 @@ services:
       - /dev/bus/usb:/dev/bus/usb    # Map cổng USB máy host vào container
       - cups-config:/etc/cups        # Lưu trữ cấu hình máy in CUPS
       - cups-spool:/var/spool/cups   # Lưu trữ hàng đợi in
+      - cups-socket:/var/run/cups    # Socket dùng chung để bypass password auth
     environment:
       - ADMIN_PASSWORD=admin_secret
 
@@ -71,3 +73,4 @@ volumes:
       type: 'none'
       o: 'bind'
       device: '${PWD}/cups/spool'
+  cups-socket:

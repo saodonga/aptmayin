@@ -245,23 +245,34 @@ export async function ensureCupsPrinterQueue(name: string, connection: string): 
   try {
     const host = getCupsHost();
     console.log(`[CUPS] Add-Printer "${name}" device-uri="${connection}" ppd="${ppdName}"`);
-    const packet = buildAddPrinter(CUPS_CALLER, targetUri, connection, ppdName);
     
-    let res = await cupsRequest(host, '/admin/', packet);
-    
-    // Nếu gặp 401, có thể container olbat/cupsd chưa được recreate mà chỉ restart,
-    // dẫn đến password vẫn là giá trị mặc định 'admin' của image gốc. Thử lại với password 'admin'.
-    if (res.httpStatus === 401) {
-      console.log(`[CUPS] 401 Unauthorized with default password. Retrying with legacy 'admin' password...`);
-      res = await cupsRequest(host, '/admin/', packet, 'admin');
-    }
-    
-    console.log(`[CUPS] Add-Printer response: HTTP ${res.httpStatus}, IPP 0x${res.ippStatus.toString(16)}`);
-    if (res.httpStatus >= 400) {
-      throw new Error(`HTTP ${res.httpStatus} từ CUPS server`);
-    }
-    if (res.ippStatus > 0x00FF) {
-      throw new Error(`IPP lỗi 0x${res.ippStatus.toString(16)}`);
+    const fs = require('fs');
+    if (fs.existsSync('/var/run/cups/cups.sock')) {
+      // Chạy trong Docker, dùng lpadmin qua Unix Socket (bypass 100% password/PAM 401)
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+      // lpadmin mặc định dùng /var/run/cups/cups.sock khi không chỉ định -h
+      // -E: Enable, -p: Name, -v: URI, -m: PPD (everywhere hoặc raw)
+      const mFlag = ppdName === 'raw' ? '' : `-m "${ppdName}"`;
+      await execAsync(`lpadmin -p "${name}" -v "${connection}" ${mFlag} -E`);
+      console.log(`[CUPS] Add-Printer via lpadmin SUCCESS`);
+      return targetUri;
+    } else {
+      // Fallback cho môi trường Windows Dev (dùng HTTP IPP)
+      const packet = buildAddPrinter(CUPS_CALLER, targetUri, connection, ppdName);
+      let res = await cupsRequest(host, '/admin/', packet);
+      if (res.httpStatus === 401) {
+        res = await cupsRequest(host, '/admin/', packet, 'admin');
+      }
+      if (res.httpStatus >= 400) {
+        throw new Error(`HTTP ${res.httpStatus} từ CUPS server`);
+      }
+      if (res.ippStatus > 0x00FF) {
+        throw new Error(`IPP lỗi 0x${res.ippStatus.toString(16)}`);
+      }
+      console.log(`[CUPS] Add-Printer via IPP HTTP SUCCESS`);
+      return targetUri;
     }
   } catch (err: any) {
     console.error(`[CUPS] ensureCupsPrinterQueue failed for "${name}":`, err);
@@ -277,23 +288,30 @@ export async function ensureCupsPrinterQueue(name: string, connection: string): 
  * Delete a printer queue from CUPS. Returns true on success or mock mode.
  */
 export async function deleteCupsPrinterQueue(name: string): Promise<boolean> {
-  if (process.env.MOCK_PRINTING === 'true') return true;
-
-  const cupsHost  = process.env.CUPS_SERVER_HOST || 'cups-server:631';
-  const printerUri = `ipp://${cupsHost}/printers/${name}`;
-
+  const targetUri = `ipp://localhost/printers/${name}`;
   try {
-    const host = getCupsHost();
-    console.log(`[CUPS] Delete-Printer "${name}"`);
-    const packet = buildDeletePrinter(CUPS_CALLER, printerUri);
-    const res    = await cupsRequest(host, '/admin/', packet);
-    console.log(`[CUPS] Delete-Printer response: HTTP ${res.httpStatus}, IPP 0x${res.ippStatus.toString(16)}`);
-    if (res.httpStatus >= 400) {
-      throw new Error(`HTTP ${res.httpStatus} từ CUPS server`);
+    const fs = require('fs');
+    if (fs.existsSync('/var/run/cups/cups.sock')) {
+      const { exec } = require('child_process');
+      const { promisify } = require('util');
+      const execAsync = promisify(exec);
+      await execAsync(`lpadmin -x "${name}"`);
+      console.log(`[CUPS] Delete-Printer via lpadmin SUCCESS: ${name}`);
+      return true;
+    } else {
+      const host = getCupsHost();
+      const packet = buildDeletePrinter(CUPS_CALLER, targetUri);
+      let res = await cupsRequest(host, '/admin/', packet);
+      if (res.httpStatus === 401) {
+        res = await cupsRequest(host, '/admin/', packet, 'admin');
+      }
+      if (res.httpStatus >= 400 || res.ippStatus > 0x00FF) {
+        return false;
+      }
+      return true;
     }
-    return true;
-  } catch (err: any) {
-    console.error(`[CUPS] deleteCupsPrinterQueue failed for "${name}":`, err);
+  } catch (err) {
+    console.warn(`[CUPS] Xoá máy in ${name} thất bại:`, err);
     return false;
   }
 }
