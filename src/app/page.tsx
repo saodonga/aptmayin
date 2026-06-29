@@ -109,6 +109,12 @@ export default function DashboardPage() {
   const [newPrinterDuplex, setNewPrinterDuplex] = useState(true);
   const [editingPrinterId, setEditingPrinterId] = useState<string | null>(null);
 
+  // Add User States
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserRole, setNewUserRole] = useState('USER');
+  const [newUserQuota, setNewUserQuota] = useState(100);
+
   // Printer Detection Wizard States
   const [detectIp, setDetectIp] = useState('');
   const [detecting, setDetecting] = useState(false);
@@ -648,6 +654,62 @@ export default function DashboardPage() {
 
       if (res.ok) {
         alert('Đã xóa người dùng thành công!');
+        fetchUsers();
+      } else {
+        const d = await res.json();
+        alert(`Lỗi: ${d.error}`);
+      }
+    } catch (e) {
+      alert('Lỗi kết nối!');
+    }
+  };
+
+  // Action Admin: Add User
+  const handleAddUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUserEmail.trim()) {
+      alert('Email không được để trống!');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: newUserEmail.trim(),
+          name: newUserName.trim() || undefined,
+          role: newUserRole,
+          pageQuota: newUserQuota
+        }),
+      });
+
+      if (res.ok) {
+        alert('Thêm người dùng thành công!');
+        setNewUserEmail('');
+        setNewUserName('');
+        setNewUserRole('USER');
+        setNewUserQuota(100);
+        fetchUsers();
+      } else {
+        const d = await res.json();
+        alert(`Lỗi: ${d.error}`);
+      }
+    } catch (e) {
+      alert('Lỗi kết nối!');
+    }
+  };
+
+  // Action Admin: Reset All Quotas
+  const handleResetQuotas = async () => {
+    const confirmReset = confirm('Bạn có chắc chắn muốn đưa số trang ĐÃ IN của TẤT CẢ người dùng về 0 không? Hành động này không thể hoàn tác! (Thường được sử dụng vào đầu tháng)');
+    if (!confirmReset) return;
+
+    try {
+      const res = await fetch('/api/admin/users/reset-quota', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        alert(data.message || 'Reset thành công!');
         fetchUsers();
       } else {
         const d = await res.json();
@@ -1699,12 +1761,86 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {/* Users management table */}
-              <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-xl overflow-hidden">
-                <div className="p-6 border-b border-slate-800 flex items-center gap-2 bg-slate-950/20">
-                  <Shield className="h-5 w-5 text-indigo-400" />
-                  <h3 className="font-bold text-white text-md">Quản lý Thành viên & Phân quyền</h3>
-                </div>
+              {/* Users management section */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+                {/* Form Add User (Left column) */}
+                <form onSubmit={handleAddUser} className="md:col-span-1 bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl space-y-4 h-fit">
+                  <div className="flex items-center gap-2 pb-2 border-b border-slate-800">
+                    <UserPlus className="h-5 w-5 text-indigo-400" />
+                    <h3 className="font-bold text-white text-md">Thêm người dùng</h3>
+                  </div>
+
+                  <div className="space-y-1.5 mt-2">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Email đăng nhập (Google)</label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="vd: nhanvien@example.com"
+                      value={newUserEmail}
+                      onChange={(e) => setNewUserEmail(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-indigo-500 text-slate-200"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tên hiển thị (Tùy chọn)</label>
+                    <input
+                      type="text"
+                      placeholder="vd: Nguyễn Văn A"
+                      value={newUserName}
+                      onChange={(e) => setNewUserName(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-indigo-500 text-slate-200"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Quyền (Role)</label>
+                    <select
+                      value={newUserRole}
+                      onChange={(e) => setNewUserRole(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:border-indigo-500 text-slate-200"
+                    >
+                      <option value="USER">Thành viên (USER)</option>
+                      <option value="ADMIN">Quản trị viên (ADMIN)</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Hạn mức (Trang/tháng)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      required
+                      value={newUserQuota}
+                      onChange={(e) => setNewUserQuota(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:border-indigo-500 text-slate-200"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full mt-2 bg-indigo-600 text-white rounded-xl py-2.5 text-xs font-bold hover:bg-indigo-500 hover:scale-[1.01] transition-all cursor-pointer shadow-md shadow-indigo-600/20"
+                  >
+                    Tạo tài khoản
+                  </button>
+                </form>
+
+                {/* Users management table (Right columns) */}
+                <div className="md:col-span-3 bg-slate-900 rounded-2xl border border-slate-800 shadow-xl overflow-hidden flex flex-col">
+                  <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/20">
+                    <div className="flex items-center gap-2">
+                      <Shield className="h-5 w-5 text-indigo-400" />
+                      <h3 className="font-bold text-white text-md">Quản lý Thành viên & Phân quyền</h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleResetQuotas}
+                      className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 rounded-lg px-3 py-1.5 text-[10px] font-bold transition-all cursor-pointer flex items-center gap-1.5"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      Reset toàn bộ Hạn mức (Đầu tháng)
+                    </button>
+                  </div>
 
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-collapse">
