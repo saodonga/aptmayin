@@ -23,6 +23,8 @@ import {
   Search,
   Wifi,
   WifiOff,
+  Menu,
+  Repeat,
   AlertCircle,
   Activity,
   ArrowRight,
@@ -30,9 +32,7 @@ import {
   Zap,
   Globe,
   Network,
-  Cable,
-  Menu,
-  Repeat
+  Cable
 } from 'lucide-react';
 
 interface PrintJob {
@@ -172,31 +172,6 @@ export default function DashboardPage() {
   const [refreshing, setRefreshing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleReprint = async (jobId: string) => {
-    if (!confirm('Bạn có muốn in lại file này không?')) return;
-    setLoading(true);
-    setSubmitMessage(null);
-    try {
-      const res = await fetch('/api/print/reprint', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setSubmitMessage({ type: 'success', text: 'Đã gửi lệnh in lại thành công!' });
-        fetchData();
-        if (session?.user?.role === 'ADMIN') fetchUsers();
-      } else {
-        setSubmitMessage({ type: 'error', text: data.error || 'Lỗi hệ thống khi in lại!' });
-      }
-    } catch (e) {
-      setSubmitMessage({ type: 'error', text: 'Không thể kết nối đến máy chủ!' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
 
 
   // Fetch all initial data
@@ -311,7 +286,32 @@ export default function DashboardPage() {
     }
   };
 
-  // Action: Print Submission
+  const handleReprint = async (jobId: string) => {
+    if (!confirm('Bạn có muốn in lại file này không?')) return;
+    setLoading(true);
+    setSubmitMessage(null);
+    try {
+      const res = await fetch('/api/print/reprint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSubmitMessage({ type: 'success', text: 'Đã gửi lệnh in lại thành công!' });
+        fetchData();
+        if (session?.user?.role === 'ADMIN') fetchUsers();
+      } else {
+        setSubmitMessage({ type: 'error', text: data.error || 'Lỗi hệ thống khi in lại!' });
+      }
+    } catch (e) {
+      setSubmitMessage({ type: 'error', text: 'Không thể kết nối đến máy chủ!' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+// Action: Print Submission
   const handlePrintSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file || !selectedPrinter) {
@@ -740,6 +740,8 @@ export default function DashboardPage() {
     } catch (e) {
       alert('Lỗi kết nối!');
     }
+  };
+
   // Action Admin: Reset All Quotas
   const handleResetQuotas = async () => {
     const confirmReset = confirm('Bạn có chắc chắn muốn đưa số trang ĐÃ IN của TẤT CẢ người dùng về 0 không? Hành động này không thể hoàn tác! (Thường được sử dụng vào đầu tháng)');
@@ -834,7 +836,6 @@ export default function DashboardPage() {
               <BarChart3 className="h-4 w-4" />
               Báo cáo & Thống kê
             </button>
-            
             {session?.user?.role === 'ADMIN' && (
               <button
                 onClick={() => { setActiveTab('admin'); setIsMobileMenuOpen(false); }}

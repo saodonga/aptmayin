@@ -4,9 +4,30 @@ import { authOptions } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { PDFDocument } from 'pdf-lib';
 import ipp from 'ipp';
-import { JobStatus } from '@prisma/client';
+import { JobStatus, User, Printer } from '@prisma/client';
+import fs from 'fs';
+import path from 'path';
+import AdmZip from 'adm-zip';
+import { v4 as uuidv4 } from 'uuid';
 
 export const dynamic = 'force-dynamic';
+
+const DATA_DIR = process.env.DATA_DIR || '/app/data';
+
+// Hàm helper để tạo thư mục lưu file và trả về đường dẫn vật lý
+function saveFileToDisk(fileBuffer: Buffer, originalName: string, jobId: string): string {
+  const yyyymm = new Date().toISOString().substring(0, 7);
+  const targetDir = path.join(DATA_DIR, yyyymm);
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
+  }
+  
+  // Tên file lưu sẽ có dạng: jobId_filename.ext để tránh trùng lặp
+  const safeName = originalName.replace(/[^a-zA-Z0-9.\-_]/g, '_');
+  const filePath = path.join(targetDir, `${jobId}_${safeName}`);
+  fs.writeFileSync(filePath, fileBuffer);
+  return filePath;
+}
 
 // 1. GET: Lấy danh sách máy in để hiển thị trên UI
 export async function GET(req: Request) {
@@ -54,64 +75,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Không tìm thấy máy in được chọn!' }, { status: 404 });
     }
 
-    // Đọc Buffer của file
-    const arrayBuffer = await file.arrayBuffer();
-    let fileBuffer = Buffer.from(arrayBuffer);
-    let isPdf = file.type === 'application/pdf' || file.name.endsWith('.pdf');
-
-    // Chuyển đổi file nếu không phải PDF (dùng Gotenberg)
-    if (!isPdf) {
-      console.log(`[API Print] Converting ${file.name} to PDF via Gotenberg...`);
-      const gotenbergUrl = process.env.GOTENBERG_URL || 'http://gotenberg:3000';
-      const ext = file.name.split('.').pop()?.toLowerCase();
-      
-      const convFormData = new FormData();
-      // append the file as a Blob with the original name
-      convFormData.append('files', new Blob([fileBuffer]), file.name);
-
-      let endpoint = `${gotenbergUrl}/forms/libreoffice/convert/pdf`;
-      // Nếu là html, markdown
-      if (ext === 'html' || ext === 'md') {
-        endpoint = `${gotenbergUrl}/forms/chromium/convert/html`;
-        if (ext === 'md') endpoint = `${gotenbergUrl}/forms/chromium/convert/markdown`;
-      }
-
-      try {
-        const convRes = await fetch(endpoint, {
-          method: 'POST',
-          body: convFormData,
-        });
-
-        if (!convRes.ok) {
-          const errText = await convRes.text();
-          console.error(`[API Print] Gotenberg error: ${errText}`);
-          return NextResponse.json({ error: 'Lỗi khi chuyển đổi file sang PDF!' }, { status: 500 });
-        }
-
-        const pdfArrayBuffer = await convRes.arrayBuffer();
-        fileBuffer = Buffer.from(pdfArrayBuffer);
-        isPdf = true;
-        console.log(`[API Print] Successfully converted ${file.name} to PDF (${fileBuffer.length} bytes)`);
-      } catch (convErr) {
-        console.error('[API Print] Gotenberg connection error:', convErr);
-        return NextResponse.json({ error: 'Không thể kết nối đến máy chủ chuyển đổi file (Gotenberg)!' }, { status: 500 });
-      }
-    }
-
-    // Tính toán số trang (Hỗ trợ PDF qua pdf-lib, các loại khác mặc định 1 trang)
-    let pageCount = 1;
-    if (isPdf) {
-      try {
-        const pdfDoc = await PDFDocument.load(fileBuffer);
-        pageCount = pdfDoc.getPageCount();
-      } catch (pdfError) {
-        console.error('Lỗi đọc số trang PDF:', pdfError);
-      }
-    }
-
-    const totalPages = pageCount * copies;
-
-    // Lấy thông tin người dùng từ DB để kiểm tra hạn mức còn lại
     const user = await db.user.findUnique({
       where: { id: session.user.id },
     });
@@ -120,124 +83,254 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Không tìm thấy thông tin người dùng!' }, { status: 404 });
     }
 
-    if (user.pagesPrinted + totalPages > user.pageQuota) {
-      return NextResponse.json(
-        { error: `Vượt quá hạn mức in! Hạn mức còn lại trong tháng của bạn là ${user.pageQuota - user.pagesPrinted} trang.` },
-        { status: 403 }
-      );
-    }
+    const isZip = file.name.endsWith('.zip') || file.type === 'application/zip' || file.type === 'application/x-zip-compressed';
 
-    // Tạo bản ghi log in ở trạng thái PROCESSING
-    // Đối với file đã convert, lưu tên file gốc để lịch sử hiển thị đúng
-    const job = await db.printJob.create({
-      data: {
-        userId: user.id,
-        printerId: printer.id,
-        fileName: file.name,
-        fileSize: fileBuffer.length,
-        pageCount: pageCount,
-        copies: copies,
-        totalPages: totalPages,
-        paperSize: paperSize,
-        duplex: duplex,
-        colorMode: colorMode,
-        status: JobStatus.PROCESSING,
-      },
-    });
-
-    const mockMode = process.env.MOCK_PRINTING === 'true';
-
-    // A. Chế độ Mock in ấn (Không cần máy in thật để phát triển/kiểm thử UI)
-    if (mockMode) {
-      await new Promise((resolve) => setTimeout(resolve, 1500)); // Giả lập độ trễ
-
-      await db.printJob.update({
-        where: { id: job.id },
-        data: { status: JobStatus.SUCCESS },
+    if (isZip) {
+      // XỬ LÝ BACKGROUND CHO ZIP
+      const arrayBuffer = await file.arrayBuffer();
+      const zipBuffer = Buffer.from(arrayBuffer);
+      
+      // Khởi chạy ngầm quá trình giải nén và in
+      processZipInBackground(zipBuffer, file.name, {
+        printer,
+        user,
+        paperSize,
+        duplex,
+        colorMode,
+        copies
       });
 
-      await db.user.update({
-        where: { id: user.id },
-        data: { pagesPrinted: { increment: totalPages } },
+      return NextResponse.json({ 
+        success: true, 
+        message: 'Đã nhận file ZIP. Hệ thống đang tiến hành giải nén và đẩy từ từ vào hàng đợi in.' 
       });
-
-      return NextResponse.json({ success: true, jobId: job.id, mock: true });
-    }
-
-    // B. Chế độ in CUPS thật qua cổng IPP
-    console.log(`[API Print] Initiating Print-Job for printer ${printer.name}`);
-    console.log(`[API Print] Connection string from DB: ${printer.connection}`);
-    
-    const targetHost = process.env.CUPS_SERVER_HOST || 'cups-server:631';
-    let connUri = printer.connection;
-    
-    // Rewrite connection string dynamically based on environment config
-    if (connUri.includes('cups-server:631')) {
-      connUri = connUri.replace('cups-server:631', targetHost);
-      console.log(`[API Print] Rewrote connection string to: ${connUri}`);
-    } else if (connUri.includes('localhost:631/')) {
-      connUri = connUri.replace('localhost:631', targetHost);
-      console.log(`[API Print] Rewrote connection string to: ${connUri}`);
-    } else if (connUri.includes('localhost:6315/')) {
-      connUri = connUri.replace('localhost:6315', targetHost);
-      console.log(`[API Print] Rewrote connection string to: ${connUri}`);
-    } else if (connUri.includes('127.0.0.1:6315/')) {
-      connUri = connUri.replace('127.0.0.1:6315', targetHost);
-      console.log(`[API Print] Rewrote connection string to: ${connUri}`);
-    }
-
-    const cupsPrinter = ipp.Printer(connUri);
-    const ippMsg = {
-      'operation-attributes-tag': {
-        'requesting-user-name': user.email,
-        'document-format': 'application/pdf',
-      },
-      'job-attributes-tag': {
-        media: paperSize === 'A3' ? 'iso_a3_297x420mm' : 'iso_a4_210x297mm',
-        sides: duplex ? 'two-sided-long-edge' : 'one-sided',
-        'print-color-mode': colorMode === 'COLOR' ? 'color' : 'monochrome',
-        copies: copies,
-      },
-      data: fileBuffer,
-    };
-
-    const printResult = await new Promise<{ success: boolean; error?: string }>((resolve) => {
-      cupsPrinter.execute('Print-Job', ippMsg, (err: any, res: any) => {
-        if (err) {
-          resolve({ success: false, error: err.message || String(err) });
-        } else {
-          resolve({ success: true });
-        }
-      });
-    });
-
-    if (printResult.success) {
-      // Cập nhật trạng thái in thành công và số trang đã in của người dùng
-      await db.printJob.update({
-        where: { id: job.id },
-        data: { status: JobStatus.SUCCESS },
-      });
-
-      await db.user.update({
-        where: { id: user.id },
-        data: { pagesPrinted: { increment: totalPages } },
-      });
-
-      return NextResponse.json({ success: true, jobId: job.id });
     } else {
-      // Đánh dấu in lỗi và ghi log
-      await db.printJob.update({
-        where: { id: job.id },
-        data: {
-          status: JobStatus.FAILED,
-          errorLog: printResult.error,
-        },
-      });
+      // XỬ LÝ ĐƠN FILE ĐỒNG BỘ
+      const arrayBuffer = await file.arrayBuffer();
+      const fileBuffer = Buffer.from(arrayBuffer);
+      
+      const result = await processAndPrintSingleFile(
+        fileBuffer, 
+        file.name, 
+        file.type,
+        { printer, user, paperSize, duplex, colorMode, copies }
+      );
 
-      return NextResponse.json({ error: `Lỗi in ấn từ CUPS: ${printResult.error}` }, { status: 500 });
+      if (result.error) {
+        return NextResponse.json({ error: result.error }, { status: result.status || 500 });
+      }
+
+      return NextResponse.json({ success: true, jobId: result.jobId, mock: result.mock });
     }
+
   } catch (error: any) {
     console.error('Lỗi API in ấn:', error);
     return NextResponse.json({ error: error.message || 'Lỗi hệ thống!' }, { status: 500 });
   }
 }
+
+// ------------------------------------------------------------------------------------------
+// BACKGROUND WORKER PROCESS (Dùng cho ZIP)
+// ------------------------------------------------------------------------------------------
+async function processZipInBackground(zipBuffer: Buffer, zipName: string, config: any) {
+  try {
+    const zip = new AdmZip(zipBuffer);
+    const zipEntries = zip.getEntries();
+    
+    // Lọc ra các file hợp lệ (bỏ qua thư mục và file ẩn như .DS_Store)
+    const validEntries = zipEntries.filter(entry => !entry.isDirectory && !entry.entryName.includes('__MACOSX') && !entry.name.startsWith('.'));
+
+    console.log(`[ZIP Process] Bắt đầu xử lý ${validEntries.length} file từ ${zipName}`);
+
+    for (let i = 0; i < validEntries.length; i++) {
+      const entry = validEntries[i];
+      const fileBuffer = entry.getData();
+      
+      // Suy luận mimetype cơ bản từ đuôi file
+      const ext = entry.name.split('.').pop()?.toLowerCase();
+      let mimeType = 'application/octet-stream';
+      if (ext === 'pdf') mimeType = 'application/pdf';
+      else if (ext === 'docx') mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+      else if (ext === 'xlsx') mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      else if (ext === 'md' || ext === 'html') mimeType = 'text/html';
+
+      console.log(`[ZIP Process] Đang in file ${i + 1}/${validEntries.length}: ${entry.name}`);
+      
+      const userRefresh = await db.user.findUnique({ where: { id: config.user.id } });
+      if (!userRefresh) break; // User bị xóa giữa chừng
+      
+      // Update config user to latest quota stats
+      config.user = userRefresh;
+
+      await processAndPrintSingleFile(fileBuffer, entry.name, mimeType, config);
+
+      // Tạm dừng 3 giây trước khi gửi file tiếp theo để hệ thống CUPS/Gotenberg không bị nghẽn
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+
+    console.log(`[ZIP Process] Hoàn tất xử lý file ZIP ${zipName}`);
+  } catch (e) {
+    console.error(`[ZIP Process] Lỗi xử lý ZIP ${zipName}:`, e);
+  }
+}
+
+// ------------------------------------------------------------------------------------------
+// SINGLE FILE PRINT LOGIC
+// ------------------------------------------------------------------------------------------
+async function processAndPrintSingleFile(
+  originalBuffer: Buffer, 
+  fileName: string, 
+  mimeType: string, 
+  config: { printer: Printer; user: User; paperSize: string; duplex: boolean; colorMode: string; copies: number }
+): Promise<{ success: boolean; jobId?: string; error?: string; status?: number; mock?: boolean }> {
+  let fileBuffer = originalBuffer;
+  let isPdf = mimeType === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf');
+  const { printer, user, paperSize, duplex, colorMode, copies } = config;
+
+  // 1. Chuyển đổi file qua Gotenberg nếu không phải PDF
+  if (!isPdf) {
+    console.log(`[API Print] Converting ${fileName} to PDF via Gotenberg...`);
+    const gotenbergUrl = process.env.GOTENBERG_URL || 'http://gotenberg:3000';
+    const ext = fileName.split('.').pop()?.toLowerCase();
+    
+    const convFormData = new FormData();
+    convFormData.append('files', new Blob([new Uint8Array(fileBuffer)]), fileName);
+
+    let endpoint = `${gotenbergUrl}/forms/libreoffice/convert/pdf`;
+    if (ext === 'html' || ext === 'md') {
+      endpoint = `${gotenbergUrl}/forms/chromium/convert/html`;
+      if (ext === 'md') endpoint = `${gotenbergUrl}/forms/chromium/convert/markdown`;
+    }
+
+    try {
+      const convRes = await fetch(endpoint, {
+        method: 'POST',
+        body: convFormData,
+      });
+
+      if (!convRes.ok) {
+        const errText = await convRes.text();
+        console.error(`[API Print] Gotenberg error: ${errText}`);
+        return { success: false, error: 'Lỗi khi chuyển đổi file sang PDF!', status: 500 };
+      }
+
+      const pdfArrayBuffer = await convRes.arrayBuffer();
+      fileBuffer = Buffer.from(pdfArrayBuffer);
+      isPdf = true;
+      console.log(`[API Print] Successfully converted ${fileName} to PDF (${fileBuffer.length} bytes)`);
+    } catch (convErr) {
+      console.error('[API Print] Gotenberg connection error:', convErr);
+      return { success: false, error: 'Không thể kết nối đến máy chủ chuyển đổi file (Gotenberg)!', status: 500 };
+    }
+  }
+
+  // 2. Tính toán số trang (bây giờ fileBuffer chắc chắn là PDF)
+  let pageCount = 1;
+  if (isPdf) {
+    try {
+      const pdfDoc = await PDFDocument.load(fileBuffer);
+      pageCount = pdfDoc.getPageCount();
+    } catch (pdfError) {
+      console.error('Lỗi đọc số trang PDF:', pdfError);
+    }
+  }
+
+  const totalPages = pageCount * copies;
+
+  // 3. Kiểm tra Hạn mức (Quota)
+  if (user.pagesPrinted + totalPages > user.pageQuota) {
+    return { 
+      error: `File ${fileName} vượt quá hạn mức in! (Cần ${totalPages} trang, còn ${user.pageQuota - user.pagesPrinted} trang).`, 
+      status: 403 
+    };
+  }
+
+  // 4. Khởi tạo Job trong DB
+  // Tạm sinh jobId trước để dùng làm tiền tố lưu file
+  const jobId = uuidv4();
+  
+  // 5. Lưu trữ file vật lý (fileBuffer lúc này là PDF hoàn thiện, hoặc file gốc nếu đã là PDF)
+  let savedFilePath = null;
+  try {
+    savedFilePath = saveFileToDisk(fileBuffer, fileName, jobId);
+  } catch (e) {
+    console.error(`[API Print] Không thể lưu file đính kèm:`, e);
+  }
+
+  const job = await db.printJob.create({
+    data: {
+      id: jobId,
+      userId: user.id,
+      printerId: printer.id,
+      fileName: fileName,
+      fileSize: fileBuffer.length,
+      pageCount: pageCount,
+      copies: copies,
+      totalPages: totalPages,
+      paperSize: paperSize,
+      duplex: duplex,
+      colorMode: colorMode,
+      status: JobStatus.PROCESSING,
+      savedFilePath: savedFilePath,
+    },
+  });
+
+  const mockMode = process.env.MOCK_PRINTING === 'true';
+
+  // 6A. Chế độ Mock
+  if (mockMode) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await db.printJob.update({ where: { id: job.id }, data: { status: JobStatus.SUCCESS } });
+    await db.user.update({ where: { id: user.id }, data: { pagesPrinted: { increment: totalPages } } });
+    return { success: true, jobId: job.id, mock: true };
+  }
+
+  // 6B. Chế độ in CUPS thật
+  console.log(`[API Print] Initiating Print-Job for printer ${printer.name}`);
+  
+  const targetHost = process.env.CUPS_SERVER_HOST || 'cups-server:631';
+  let connUri = printer.connection;
+  
+  if (connUri.includes('cups-server:631')) connUri = connUri.replace('cups-server:631', targetHost);
+  else if (connUri.includes('localhost:631/')) connUri = connUri.replace('localhost:631', targetHost);
+  else if (connUri.includes('localhost:6315/')) connUri = connUri.replace('localhost:6315', targetHost);
+  else if (connUri.includes('127.0.0.1:6315/')) connUri = connUri.replace('127.0.0.1:6315', targetHost);
+
+  const cupsPrinter = ipp.Printer(connUri);
+  const ippMsg = {
+    'operation-attributes-tag': {
+      'requesting-user-name': user.email,
+      'document-format': 'application/pdf',
+    },
+    'job-attributes-tag': {
+      media: paperSize === 'A3' ? 'iso_a3_297x420mm' : 'iso_a4_210x297mm',
+      sides: duplex ? 'two-sided-long-edge' : 'one-sided',
+      'print-color-mode': colorMode === 'COLOR' ? 'color' : 'monochrome',
+      copies: copies,
+    },
+    data: fileBuffer,
+  };
+
+  const printResult = await new Promise<{ success: boolean; error?: string }>((resolve) => {
+    cupsPrinter.execute('Print-Job', ippMsg, (err: any, res: any) => {
+      if (err) {
+        resolve({ success: false, error: err.message || String(err) });
+      } else {
+        resolve({ success: true });
+      }
+    });
+  });
+
+  if (printResult.success) {
+    await db.printJob.update({ where: { id: job.id }, data: { status: JobStatus.SUCCESS } });
+    await db.user.update({ where: { id: user.id }, data: { pagesPrinted: { increment: totalPages } } });
+    return { success: true, jobId: job.id };
+  } else {
+    await db.printJob.update({
+      where: { id: job.id },
+      data: { status: JobStatus.FAILED, errorLog: printResult.error },
+    });
+    return { error: `Lỗi in ấn từ CUPS: ${printResult.error}`, status: 500 };
+  }
+}
+

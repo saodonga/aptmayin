@@ -161,7 +161,7 @@ async function cupsRequest(
       headers: {
         'Content-Type': 'application/ipp',
         'Content-Length': packet.length,
-        'Authorization': `Basic ${Buffer.from(`${process.env.CUPS_ADMIN_USER || 'admin'}:${process.env.CUPS_ADMIN_PASSWORD || 'admin_secret'}`).toString('base64')}`
+        'Authorization': `Basic ${Buffer.from(`${process.env.CUPS_ADMIN_USER || 'printadmin'}:${process.env.CUPS_ADMIN_PASSWORD || 'admin_secret'}`).toString('base64')}`
       },
     };
 
