@@ -92,6 +92,7 @@ export default function DashboardPage() {
   // Application data states
   const [printers, setPrinters] = useState<PrinterConfig[]>([]);
   const [history, setHistory] = useState<PrintJob[]>([]);
+  const [historySearchQuery, setHistorySearchQuery] = useState('');
   const [users, setUsers] = useState<UserConfig[]>([]);
   const [userData, setUserData] = useState<{ pagesPrinted: number; pageQuota: number } | null>(null);
 
@@ -1142,6 +1143,25 @@ export default function DashboardPage() {
           {/* TAB 2: HISTORY */}
           {activeTab === 'history' && (
             <div className="max-w-6xl mx-auto bg-slate-900 rounded-2xl border border-slate-800 shadow-xl overflow-hidden">
+              <div className="p-4 sm:p-6 border-b border-slate-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                  <History className="h-5 w-5 text-indigo-400" />
+                  Lịch sử in ấn
+                </h2>
+                {history.length > 0 && (
+                  <div className="relative w-full sm:w-auto">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Tìm kiếm tên file..."
+                      value={historySearchQuery}
+                      onChange={(e) => setHistorySearchQuery(e.target.value)}
+                      className="w-full sm:w-64 pl-9 pr-4 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
+                    />
+                  </div>
+                )}
+              </div>
+              
               {history.length === 0 ? (
                 <div className="p-20 text-center flex flex-col items-center">
                   <div className="p-4 rounded-full bg-slate-800 text-slate-500 mb-4">
@@ -1168,7 +1188,13 @@ export default function DashboardPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/80">
-                      {history.map((job) => (
+                      {history.filter(job => job.fileName.toLowerCase().includes(historySearchQuery.toLowerCase())).length === 0 ? (
+                        <tr>
+                          <td colSpan={10} className="p-8 text-center text-slate-400 text-sm">
+                            Không tìm thấy file nào khớp với từ khóa "{historySearchQuery}"
+                          </td>
+                        </tr>
+                      ) : history.filter(job => job.fileName.toLowerCase().includes(historySearchQuery.toLowerCase())).map((job) => (
                         <tr key={job.id} className="hover:bg-slate-850/40 transition-colors">
                           {session?.user?.role === 'ADMIN' && (
                             <td className="p-4">
