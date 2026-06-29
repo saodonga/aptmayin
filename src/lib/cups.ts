@@ -148,11 +148,14 @@ interface IppResult {
 async function cupsRequest(
   cupsHost: string,
   path: string,
-  packet: Buffer
+  packet: Buffer,
+  passwordOverride?: string
 ): Promise<IppResult> {
   const [hostname, portStr] = cupsHost.split(':');
   const port = portStr ? parseInt(portStr, 10) : 631;
   const timeoutMs = parseInt(process.env.CUPS_TIMEOUT_MS || '8000', 10);
+  
+  const pass = passwordOverride || process.env.CUPS_ADMIN_PASSWORD || 'admin_secret';
 
   return new Promise<IppResult>((resolve, reject) => {
     const opts: http.RequestOptions = {
@@ -161,7 +164,7 @@ async function cupsRequest(
       headers: {
         'Content-Type': 'application/ipp',
         'Content-Length': packet.length,
-        'Authorization': `Basic ${Buffer.from(`${process.env.CUPS_ADMIN_USER || 'printadmin'}:${process.env.CUPS_ADMIN_PASSWORD || 'admin_secret'}`).toString('base64')}`
+        'Authorization': `Basic ${Buffer.from(`${process.env.CUPS_ADMIN_USER || 'printadmin'}:${pass}`).toString('base64')}`
       },
     };
 
@@ -243,7 +246,16 @@ export async function ensureCupsPrinterQueue(name: string, connection: string): 
     const host = getCupsHost();
     console.log(`[CUPS] Add-Printer "${name}" device-uri="${connection}" ppd="${ppdName}"`);
     const packet = buildAddPrinter(CUPS_CALLER, targetUri, connection, ppdName);
-    const res    = await cupsRequest(host, '/admin/', packet);
+    
+    let res = await cupsRequest(host, '/admin/', packet);
+    
+    // Nếu gặp 401, có thể container olbat/cupsd chưa được recreate mà chỉ restart,
+    // dẫn đến password vẫn là giá trị mặc định 'admin' của image gốc. Thử lại với password 'admin'.
+    if (res.httpStatus === 401) {
+      console.log(`[CUPS] 401 Unauthorized with default password. Retrying with legacy 'admin' password...`);
+      res = await cupsRequest(host, '/admin/', packet, 'admin');
+    }
+    
     console.log(`[CUPS] Add-Printer response: HTTP ${res.httpStatus}, IPP 0x${res.ippStatus.toString(16)}`);
     if (res.httpStatus >= 400) {
       throw new Error(`HTTP ${res.httpStatus} từ CUPS server`);
