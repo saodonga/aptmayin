@@ -14,6 +14,7 @@ services:
       - GOTENBERG_URL=http://gotenberg:3000
     volumes:
       - temp-print-files:/app/temp
+      - print-data:/app/data
     depends_on:
       - cups-server
       - gotenberg
@@ -52,6 +53,12 @@ volumes:
       type: 'none'
       o: 'bind'
       device: '${PWD}/temp'
+  print-data:
+    driver: local
+    driver_opts:
+      type: 'none'
+      o: 'bind'
+      device: '${PWD}/data'
   cups-config:
     driver: local
     driver_opts:

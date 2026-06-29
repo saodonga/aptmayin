@@ -240,7 +240,8 @@ async function processAndPrintSingleFile(
   // 3. Kiểm tra Hạn mức (Quota)
   if (user.pagesPrinted + totalPages > user.pageQuota) {
     return { 
-      error: `File ${fileName} vượt quá hạn mức in! (Cần ${totalPages} trang, còn ${user.pageQuota - user.pagesPrinted} trang).`, 
+      success: false,
+      error: `File ${fileName} vượt quá hạn mức in! (Cần ${totalPages} trang, còn ${user.pageQuota - user.pagesPrinted} trang)`, 
       status: 403 
     };
   }
@@ -330,7 +331,7 @@ async function processAndPrintSingleFile(
       where: { id: job.id },
       data: { status: JobStatus.FAILED, errorLog: printResult.error },
     });
-    return { error: `Lỗi in ấn từ CUPS: ${printResult.error}`, status: 500 };
+    return { success: false, error: `Lỗi in ấn từ CUPS: ${printResult.error}`, status: 500 };
   }
 }
 

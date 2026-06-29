@@ -63,5 +63,6 @@ model PrintJob {
   colorMode   String     @default("GRAY") // GRAY, COLOR
   status      JobStatus  @default(PENDING)
   errorLog    String?    // Chi tiết lỗi nếu thất bại
+  savedFilePath String?  // File đính kèm để in lại
   createdAt   DateTime   @default(now())
 }
