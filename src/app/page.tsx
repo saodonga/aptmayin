@@ -30,7 +30,9 @@ import {
   Zap,
   Globe,
   Network,
-  Cable
+  Cable,
+  Menu,
+  Repeat
 } from 'lucide-react';
 
 interface PrintJob {
@@ -85,6 +87,7 @@ export default function DashboardPage() {
 
   // Navigation state
   const [activeTab, setActiveTab] = useState<'print' | 'history' | 'analytics' | 'admin'>('print');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Application data states
   const [printers, setPrinters] = useState<PrinterConfig[]>([]);
@@ -168,6 +171,31 @@ export default function DashboardPage() {
   const [submitMessage, setSubmitMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleReprint = async (jobId: string) => {
+    if (!confirm('Bạn có muốn in lại file này không?')) return;
+    setLoading(true);
+    setSubmitMessage(null);
+    try {
+      const res = await fetch('/api/print/reprint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setSubmitMessage({ type: 'success', text: 'Đã gửi lệnh in lại thành công!' });
+        fetchData();
+        if (session?.user?.role === 'ADMIN') fetchUsers();
+      } else {
+        setSubmitMessage({ type: 'error', text: data.error || 'Lỗi hệ thống khi in lại!' });
+      }
+    } catch (e) {
+      setSubmitMessage({ type: 'error', text: 'Không thể kết nối đến máy chủ!' });
+    } finally {
+      setLoading(false);
+    }
+  };
 
 
 
@@ -712,8 +740,6 @@ export default function DashboardPage() {
     } catch (e) {
       alert('Lỗi kết nối!');
     }
-  };
-
   // Action Admin: Reset All Quotas
   const handleResetQuotas = async () => {
     const confirmReset = confirm('Bạn có chắc chắn muốn đưa số trang ĐÃ IN của TẤT CẢ người dùng về 0 không? Hành động này không thể hoàn tác! (Thường được sử dụng vào đầu tháng)');
@@ -740,9 +766,27 @@ export default function DashboardPage() {
   const quotaPercent = Math.min(Math.round((quotaUsed / quotaLimit) * 100), 100);
 
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden">
+    <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden relative w-full">
+      {/* Mobile Menu Button */}
+      <div className="md:hidden absolute top-4 left-4 z-50">
+        <button 
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)} 
+          className="p-2 bg-slate-800/80 backdrop-blur-sm rounded-xl border border-slate-700 text-slate-200 shadow-lg"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
+      </div>
+
+      {/* Mobile Menu Overlay */}
+      {isMobileMenuOpen && (
+        <div 
+          className="md:hidden fixed inset-0 bg-black/60 z-40 backdrop-blur-sm" 
+          onClick={() => setIsMobileMenuOpen(false)} 
+        />
+      )}
+
       {/* 1. Sidebar */}
-      <aside className="w-64 bg-slate-900 border-r border-slate-800 flex flex-col justify-between shrink-0">
+      <aside className={`fixed md:static inset-y-0 left-0 z-50 w-64 bg-slate-900 border-r border-slate-800 flex flex-col justify-between shrink-0 transform transition-transform duration-300 ease-in-out ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`}>
         <div>
           {/* Sidebar Header */}
           <div className="p-6 border-b border-slate-800 flex items-center gap-3">
@@ -758,7 +802,7 @@ export default function DashboardPage() {
           {/* Sidebar Navigation */}
           <nav className="p-4 space-y-1">
             <button
-              onClick={() => setActiveTab('print')}
+              onClick={() => { setActiveTab('print'); setIsMobileMenuOpen(false); }}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
                 activeTab === 'print'
                   ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/15'
@@ -769,7 +813,7 @@ export default function DashboardPage() {
               In tài liệu
             </button>
             <button
-              onClick={() => setActiveTab('history')}
+              onClick={() => { setActiveTab('history'); setIsMobileMenuOpen(false); }}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
                 activeTab === 'history'
                   ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/15'
@@ -780,7 +824,7 @@ export default function DashboardPage() {
               Lịch sử in
             </button>
             <button
-              onClick={() => setActiveTab('analytics')}
+              onClick={() => { setActiveTab('analytics'); setIsMobileMenuOpen(false); }}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
                 activeTab === 'analytics'
                   ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/15'
@@ -790,63 +834,51 @@ export default function DashboardPage() {
               <BarChart3 className="h-4 w-4" />
               Báo cáo & Thống kê
             </button>
+            
             {session?.user?.role === 'ADMIN' && (
               <button
-                onClick={() => setActiveTab('admin')}
-                className={`w-full flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all ${
+                onClick={() => { setActiveTab('admin'); setIsMobileMenuOpen(false); }}
+                className={`w-full mt-4 flex items-center justify-between px-4 py-3 rounded-xl text-sm font-medium transition-all ${
                   activeTab === 'admin'
-                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/15'
+                    ? 'bg-indigo-600/20 text-indigo-400 border border-indigo-500/30'
                     : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'
                 }`}
               >
-                <span className="flex items-center gap-3">
+                <div className="flex items-center gap-3">
                   <Settings className="h-4 w-4" />
                   Quản lý hệ thống
-                </span>
-                <span className="bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">
-                  Admin
-                </span>
+                </div>
+                <span className="text-[10px] font-bold bg-indigo-500/20 text-indigo-400 px-2 py-0.5 rounded uppercase">Admin</span>
               </button>
             )}
           </nav>
         </div>
 
-        {/* Sidebar Footer (User Info & Quota Info) */}
-        <div className="p-4 border-t border-slate-800 space-y-4">
-          {/* Quota Progress widget */}
-          <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800/80">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-[11px] text-slate-400 font-medium uppercase tracking-wider">Hạn mức tháng</span>
-              <span className="text-xs font-semibold text-indigo-400">{quotaUsed}/{quotaLimit} trang</span>
+        {/* User Info & Quota (Bottom Sidebar) */}
+        <div className="p-4 border-t border-slate-800 bg-slate-900/50">
+          <div className="mb-4">
+            <div className="flex justify-between items-end mb-2">
+              <span className="text-xs font-semibold text-slate-500 uppercase">Hạn mức tháng</span>
+              <span className="text-xs text-slate-300 font-mono">{quotaUsed}/{quotaLimit} trang</span>
             </div>
-            <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
+            <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
               <div 
-                className="bg-indigo-500 h-full rounded-full transition-all duration-500" 
+                className={`h-full rounded-full ${quotaPercent > 90 ? 'bg-red-500' : quotaPercent > 70 ? 'bg-amber-500' : 'bg-indigo-500'}`} 
                 style={{ width: `${quotaPercent}%` }}
-              ></div>
+              />
             </div>
           </div>
-
-          {/* User profile details */}
-          <div className="flex items-center justify-between p-1 bg-slate-950/40 rounded-xl border border-slate-800/40">
-            <div className="flex items-center gap-3 overflow-hidden p-1">
-              {session?.user?.image ? (
-                <img 
-                  src={session.user.image} 
-                  alt="avatar" 
-                  className="h-8 w-8 rounded-lg shrink-0 border border-slate-700 shadow-inner" 
-                />
-              ) : (
-                <div className="h-8 w-8 rounded-lg bg-indigo-600 flex items-center justify-center shrink-0 text-xs font-bold text-white uppercase shadow-inner">
-                  {session?.user?.name?.substring(0, 2) || 'US'}
-                </div>
-              )}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3 truncate">
+              <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center shrink-0">
+                <span className="text-sm font-bold text-slate-300">{session?.user?.name?.[0] || 'U'}</span>
+              </div>
               <div className="truncate">
-                <div className="text-xs font-semibold text-white truncate leading-tight">{session?.user?.name}</div>
-                <div className="text-[10px] text-slate-400 truncate mt-0.5">{session?.user?.email}</div>
+                <p className="text-sm font-medium text-slate-200 truncate">{session?.user?.name}</p>
+                <p className="text-[10px] text-slate-500 truncate">{session?.user?.email}</p>
               </div>
             </div>
-            <button
+            <button 
               onClick={() => signOut({ callbackUrl: '/login' })}
               className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors shrink-0"
               title="Đăng xuất"
@@ -860,7 +892,7 @@ export default function DashboardPage() {
       {/* 2. Main Content Window */}
       <main className="flex-1 flex flex-col min-w-0 bg-slate-950">
         {/* Header */}
-        <header className="h-16 border-b border-slate-800 flex items-center justify-between px-8 bg-slate-900/40 backdrop-blur-sm">
+        <header className="h-16 border-b border-slate-800 flex items-center justify-between px-4 md:px-8 pl-16 md:pl-8 bg-slate-900/40 backdrop-blur-sm">
           <div className="flex items-center gap-4">
             <h2 className="text-lg font-bold text-white capitalize tracking-wide">
               {activeTab === 'print' && 'Gửi Yêu Cầu In Ấn'}
@@ -1131,6 +1163,7 @@ export default function DashboardPage() {
                         <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-center">Số trang</th>
                         <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-center">Trạng thái</th>
                         <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-right">Thời gian</th>
+                        <th className="p-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-right">Thao tác</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/80">
@@ -1183,6 +1216,16 @@ export default function DashboardPage() {
                               day: '2-digit',
                               month: '2-digit',
                             })}
+                          </td>
+                          <td className="p-4 text-xs text-right">
+                            <button
+                              onClick={() => handleReprint(job.id)}
+                              disabled={loading || job.status === 'PROCESSING'}
+                              className="p-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded transition-colors disabled:opacity-50 inline-flex items-center gap-1"
+                              title="In lại file này"
+                            >
+                              <Repeat className="w-3.5 h-3.5" />
+                            </button>
                           </td>
                         </tr>
                       ))}
