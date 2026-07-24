@@ -16,77 +16,12 @@ export const authOptions: AuthOptions = {
     }),
   ],
 
-  /**
-   * FIX: OAuthCallback error khi deploy sau reverse proxy.
-   *
-   * Root cause: Cookies OAuth flow (đặc biệt là next-auth.state) bị browser
-   * drop khi đi qua HTTPS redirect nếu không cấu hình SameSite đúng.
-   *
-   * Giải pháp v4:
-   *  - Không dùng __Secure- prefix (gây lỗi nếu nginx không set X-Forwarded-Proto)
-   *  - SameSite=lax cho phép cookie đi qua cross-site redirect (OAuth flow)
-   *  - NEXTAUTH_URL phải đặt đúng trong .env trên server
-   */
-  cookies: {
-    sessionToken: {
-      name: 'next-auth.session-token',
-      options: {
-        httpOnly: true,
-        sameSite: 'lax' as const,
-        path: '/',
-        secure: false, // nginx handles SSL; container sees HTTP internally
-      },
-    },
-    callbackUrl: {
-      name: 'next-auth.callback-url',
-      options: {
-        httpOnly: true,
-        sameSite: 'lax' as const,
-        path: '/',
-        secure: false,
-      },
-    },
-    csrfToken: {
-      name: 'next-auth.csrf-token',
-      options: {
-        httpOnly: true,
-        sameSite: 'lax' as const,
-        path: '/',
-        secure: false,
-      },
-    },
-    // State cookie: critical cho OAuth flow — nếu thiếu/sai sẽ gây OAuthCallback error
-    state: {
-      name: 'next-auth.state',
-      options: {
-        httpOnly: true,
-        sameSite: 'lax' as const,
-        path: '/',
-        secure: false,
-        maxAge: 900, // 15 phút — đủ thời gian hoàn thành OAuth flow
-      },
-    },
-    // PKCE verifier cho Google OAuth (OpenID Connect)
-    pkceCodeVerifier: {
-      name: 'next-auth.pkce.code_verifier',
-      options: {
-        httpOnly: true,
-        sameSite: 'lax' as const,
-        path: '/',
-        secure: false,
-        maxAge: 900,
-      },
-    },
-    nonce: {
-      name: 'next-auth.nonce',
-      options: {
-        httpOnly: true,
-        sameSite: 'lax' as const,
-        path: '/',
-        secure: false,
-      },
-    },
-  },
+
+  // Không cần custom cookie config — site dùng HTTPS qua Cloudflare.
+  // NextAuth v4 production defaults (Secure=true, SameSite=Lax, HttpOnly=true)
+  // hoạt động hoàn toàn đúng với HTTPS. Browser nhận Secure cookie từ HTTPS
+  // connection → lưu trữ và gửi lại đúng khi Google redirect về callback URL.
+
 
   // Log lỗi auth chi tiết ra stderr để dễ debug qua docker logs
   logger: {
