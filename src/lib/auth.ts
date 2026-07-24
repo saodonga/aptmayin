@@ -139,24 +139,30 @@ export const authOptions: AuthOptions = {
     },
 
     async jwt({ token, user }) {
-      if (user) {
-        const dbUser = await db.user.findUnique({
-          where: { email: user.email! },
-          select: { role: true, id: true },
-        });
-        if (dbUser) {
-          token.role = dbUser.role;
-          token.id = dbUser.id;
+      try {
+        if (user) {
+          const dbUser = await db.user.findUnique({
+            where: { email: user.email! },
+            select: { role: true, id: true },
+          });
+          if (dbUser) {
+            token.role = dbUser.role;
+            token.id = dbUser.id;
+          }
+        } else if (token.email) {
+          const dbUser = await db.user.findUnique({
+            where: { email: token.email },
+            select: { role: true, id: true },
+          });
+          if (dbUser) {
+            token.role = dbUser.role;
+            token.id = dbUser.id;
+          }
         }
-      } else if (token.email) {
-        const dbUser = await db.user.findUnique({
-          where: { email: token.email },
-          select: { role: true, id: true },
-        });
-        if (dbUser) {
-          token.role = dbUser.role;
-          token.id = dbUser.id;
-        }
+      } catch (error) {
+        // DB lỗi tạm thời → vẫn trả token (không có role/id).
+        // Session vẫn được tạo, user đăng nhập được.
+        console.error('[Auth] jwt DB lookup failed (non-blocking):', error);
       }
       return token;
     },
@@ -167,6 +173,7 @@ export const authOptions: AuthOptions = {
       }
       return session;
     },
+
   },
   pages: {
     signIn: '/login',
