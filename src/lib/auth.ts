@@ -17,37 +17,33 @@ export const authOptions: AuthOptions = {
   ],
 
   /**
-   * FIX: OAuthCallback error khi deploy sau reverse proxy (nginx / Cloudflare).
+   * FIX: OAuthCallback error khi deploy sau reverse proxy.
    *
-   * next-auth v4 KHÔNG có trustHost/useSecureCookies (đó là v5 API).
-   * Trong v4, proxy trust được xử lý bằng:
-   *  1. NEXTAUTH_URL=https://mayin.kinhtesox.net  (set trong .env trên server)
-   *  2. Cookie config bên dưới để đảm bảo SameSite=lax qua HTTPS redirect.
+   * Root cause: Cookies OAuth flow (đặc biệt là next-auth.state) bị browser
+   * drop khi đi qua HTTPS redirect nếu không cấu hình SameSite đúng.
    *
-   * Nếu chạy sau nginx, cần đảm bảo nginx forward header:
-   *   proxy_set_header X-Forwarded-Proto https;
+   * Giải pháp v4:
+   *  - Không dùng __Secure- prefix (gây lỗi nếu nginx không set X-Forwarded-Proto)
+   *  - SameSite=lax cho phép cookie đi qua cross-site redirect (OAuth flow)
+   *  - NEXTAUTH_URL phải đặt đúng trong .env trên server
    */
   cookies: {
     sessionToken: {
-      name: process.env.NODE_ENV === 'production'
-        ? '__Secure-next-auth.session-token'
-        : 'next-auth.session-token',
+      name: 'next-auth.session-token',
       options: {
         httpOnly: true,
         sameSite: 'lax' as const,
         path: '/',
-        secure: process.env.NODE_ENV === 'production',
+        secure: false, // nginx handles SSL; container sees HTTP internally
       },
     },
     callbackUrl: {
-      name: process.env.NODE_ENV === 'production'
-        ? '__Secure-next-auth.callback-url'
-        : 'next-auth.callback-url',
+      name: 'next-auth.callback-url',
       options: {
         httpOnly: true,
         sameSite: 'lax' as const,
         path: '/',
-        secure: process.env.NODE_ENV === 'production',
+        secure: false,
       },
     },
     csrfToken: {
@@ -56,8 +52,49 @@ export const authOptions: AuthOptions = {
         httpOnly: true,
         sameSite: 'lax' as const,
         path: '/',
-        secure: process.env.NODE_ENV === 'production',
+        secure: false,
       },
+    },
+    // State cookie: critical cho OAuth flow — nếu thiếu/sai sẽ gây OAuthCallback error
+    state: {
+      name: 'next-auth.state',
+      options: {
+        httpOnly: true,
+        sameSite: 'lax' as const,
+        path: '/',
+        secure: false,
+        maxAge: 900, // 15 phút — đủ thời gian hoàn thành OAuth flow
+      },
+    },
+    // PKCE verifier cho Google OAuth (OpenID Connect)
+    pkceCodeVerifier: {
+      name: 'next-auth.pkce.code_verifier',
+      options: {
+        httpOnly: true,
+        sameSite: 'lax' as const,
+        path: '/',
+        secure: false,
+        maxAge: 900,
+      },
+    },
+    nonce: {
+      name: 'next-auth.nonce',
+      options: {
+        httpOnly: true,
+        sameSite: 'lax' as const,
+        path: '/',
+        secure: false,
+      },
+    },
+  },
+
+  // Log lỗi auth chi tiết ra stderr để dễ debug qua docker logs
+  logger: {
+    error(code, metadata) {
+      console.error('[NextAuth Error]', code, JSON.stringify(metadata));
+    },
+    warn(code) {
+      console.warn('[NextAuth Warn]', code);
     },
   },
 
