@@ -2,12 +2,13 @@
 
 import { signIn, useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Printer } from 'lucide-react';
 
 export default function LoginPage() {
   const { status } = useSession();
   const router = useRouter();
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     if (status === 'authenticated') {
@@ -22,6 +23,14 @@ export default function LoginPage() {
       </div>
     );
   }
+
+  const handleSignIn = async () => {
+    if (isLoading) return; // Ngăn double-click
+    setIsLoading(true);
+    await signIn('google', { callbackUrl: '/' });
+    // Nếu signIn không redirect (lỗi), reset loading
+    setIsLoading(false);
+  };
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 px-4 sm:px-6 lg:px-8">
@@ -40,8 +49,9 @@ export default function LoginPage() {
 
         <div className="mt-8 space-y-6">
           <button
-            onClick={() => signIn('google', { callbackUrl: '/' })}
-            className="group relative flex w-full justify-center items-center rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 transition-all duration-300 shadow-lg shadow-indigo-600/30 hover:scale-[1.02]"
+            onClick={handleSignIn}
+            disabled={isLoading}
+            className="group relative flex w-full justify-center items-center rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 transition-all duration-300 shadow-lg shadow-indigo-600/30 hover:scale-[1.02] disabled:opacity-60 disabled:cursor-not-allowed disabled:scale-100"
           >
             {/* SVG Logo Google */}
             <svg className="mr-3 h-5 w-5 text-white" viewBox="0 0 24 24" fill="currentColor">
