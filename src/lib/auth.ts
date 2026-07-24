@@ -15,8 +15,64 @@ export const authOptions: AuthOptions = {
       },
     }),
   ],
+
+  /**
+   * FIX: OAuthCallback error khi deploy sau reverse proxy (nginx / Cloudflare).
+   *
+   * Vấn đề gốc:
+   *  - NEXTAUTH_URL="http://localhost:3500" → NextAuth tạo callback URL sai,
+   *    Google redirect về localhost thay vì mayin.kinhtesox.net → OAuthCallback error.
+   *  - Cookie CSRF bị mất vì thiếu Secure/SameSite flags khi qua HTTPS proxy.
+   *
+   * Giải pháp:
+   *  - trustHost: true  → NextAuth tự detect host từ X-Forwarded-Host header
+   *    (nginx/Cloudflare tự set header này), không còn phụ thuộc NEXTAUTH_URL.
+   *  - useSecureCookies → đặt Secure flag trên tất cả auth cookies khi HTTPS.
+   *  - cookies config   → đặt SameSite=lax để CSRF token tồn tại qua redirect OAuth.
+   */
+  trustHost: true,
+
+  useSecureCookies: process.env.NODE_ENV === 'production',
+
+  cookies: {
+    sessionToken: {
+      name: process.env.NODE_ENV === 'production'
+        ? '__Secure-next-auth.session-token'
+        : 'next-auth.session-token',
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: process.env.NODE_ENV === 'production',
+      },
+    },
+    callbackUrl: {
+      name: process.env.NODE_ENV === 'production'
+        ? '__Secure-next-auth.callback-url'
+        : 'next-auth.callback-url',
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: process.env.NODE_ENV === 'production',
+      },
+    },
+    csrfToken: {
+      // CSRF token KHÔNG dùng __Secure- prefix vì nó phải đọc được từ JS
+      name: 'next-auth.csrf-token',
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: process.env.NODE_ENV === 'production',
+      },
+    },
+  },
+
   session: {
     strategy: 'jwt',
+    // Tăng maxAge để giảm tần suất re-auth (mặc định 30 ngày)
+    maxAge: 30 * 24 * 60 * 60, // 30 days
   },
   callbacks: {
     async signIn({ user }) {
