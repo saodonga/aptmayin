@@ -25,7 +25,7 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: 'Máy In Tự Xa – Remote Print Server',
+  title: 'Máy in từ xa – Remote Print Server',
   description:
     'Hệ thống quản lý và in ấn từ xa – gửi tài liệu đến máy in qua mạng nội bộ hoặc Internet.',
   applicationName: 'MayInKTS',
