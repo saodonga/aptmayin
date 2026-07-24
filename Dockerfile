@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:22-alpine
 
 WORKDIR /app
 
@@ -29,14 +29,22 @@ RUN npx prisma generate
 # 5. Sao chép toàn bộ mã nguồn ứng dụng
 COPY . .
 
-# 6. Tắt telemetry và Build ứng dụng Next.js
-ENV NEXT_TELEMETRY_DISABLED 1
+# 6. Tắt telemetry và Build ứng dụng Next.js (standalone mode)
+ENV NEXT_TELEMETRY_DISABLED=1
 ENV DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy"
 ENV NEXTAUTH_SECRET="dummy_secret_for_build"
 RUN npm run build
 
-# 7. Expose cổng chạy ứng dụng
+# 7. Copy public assets và static files vào standalone bundle
+#    (bắt buộc khi dùng output: standalone — Next.js không tự copy)
+RUN cp -r public .next/standalone/public && \
+    cp -r .next/static .next/standalone/.next/static
+
+# 8. Expose cổng chạy ứng dụng
 EXPOSE 3500
 
-# 8. Chạy ứng dụng Next.js ở chế độ Production
-CMD ["npm", "run", "start"]
+# 9. Chạy standalone server — ĐÚNG cách với output: standalone
+#    "next start" KHÔNG hoạt động với standalone, phải dùng node server.js
+ENV PORT=3500
+ENV HOSTNAME=0.0.0.0
+CMD ["node", ".next/standalone/server.js"]
