@@ -19,21 +19,14 @@ export const authOptions: AuthOptions = {
   /**
    * FIX: OAuthCallback error khi deploy sau reverse proxy (nginx / Cloudflare).
    *
-   * Vấn đề gốc:
-   *  - NEXTAUTH_URL="http://localhost:3500" → NextAuth tạo callback URL sai,
-   *    Google redirect về localhost thay vì mayin.kinhtesox.net → OAuthCallback error.
-   *  - Cookie CSRF bị mất vì thiếu Secure/SameSite flags khi qua HTTPS proxy.
+   * next-auth v4 KHÔNG có trustHost/useSecureCookies (đó là v5 API).
+   * Trong v4, proxy trust được xử lý bằng:
+   *  1. NEXTAUTH_URL=https://mayin.kinhtesox.net  (set trong .env trên server)
+   *  2. Cookie config bên dưới để đảm bảo SameSite=lax qua HTTPS redirect.
    *
-   * Giải pháp:
-   *  - trustHost: true  → NextAuth tự detect host từ X-Forwarded-Host header
-   *    (nginx/Cloudflare tự set header này), không còn phụ thuộc NEXTAUTH_URL.
-   *  - useSecureCookies → đặt Secure flag trên tất cả auth cookies khi HTTPS.
-   *  - cookies config   → đặt SameSite=lax để CSRF token tồn tại qua redirect OAuth.
+   * Nếu chạy sau nginx, cần đảm bảo nginx forward header:
+   *   proxy_set_header X-Forwarded-Proto https;
    */
-  trustHost: true,
-
-  useSecureCookies: process.env.NODE_ENV === 'production',
-
   cookies: {
     sessionToken: {
       name: process.env.NODE_ENV === 'production'
@@ -41,7 +34,7 @@ export const authOptions: AuthOptions = {
         : 'next-auth.session-token',
       options: {
         httpOnly: true,
-        sameSite: 'lax',
+        sameSite: 'lax' as const,
         path: '/',
         secure: process.env.NODE_ENV === 'production',
       },
@@ -52,17 +45,16 @@ export const authOptions: AuthOptions = {
         : 'next-auth.callback-url',
       options: {
         httpOnly: true,
-        sameSite: 'lax',
+        sameSite: 'lax' as const,
         path: '/',
         secure: process.env.NODE_ENV === 'production',
       },
     },
     csrfToken: {
-      // CSRF token KHÔNG dùng __Secure- prefix vì nó phải đọc được từ JS
       name: 'next-auth.csrf-token',
       options: {
         httpOnly: true,
-        sameSite: 'lax',
+        sameSite: 'lax' as const,
         path: '/',
         secure: process.env.NODE_ENV === 'production',
       },
