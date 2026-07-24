@@ -1582,16 +1582,38 @@ export default function DashboardPage() {
                                   hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit'
                                 })}
                               </td>
-                              <td className="p-4 text-xs text-right">
-                                <button
-                                  onClick={() => handleReprint(job.id)}
-                                  disabled={loading || job.status === 'PROCESSING'}
-                                  className="p-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded transition-colors disabled:opacity-50 inline-flex items-center gap-1"
-                                  title="In lại file này"
-                                >
-                                  <Repeat className="w-3.5 h-3.5" />
-                                </button>
-                              </td>
+                             <td className="p-4 text-xs text-right">
+                               <div className="flex items-center justify-end gap-1.5">
+                                 {job.hasFile && (
+                                   <>
+                                     <a
+                                       href={`/api/history/${job.id}/file?action=view`}
+                                       target="_blank"
+                                       rel="noopener noreferrer"
+                                       className="p-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded transition-colors inline-flex items-center gap-1"
+                                       title="Xem file PDF"
+                                   >
+                                       <FileText className="w-3.5 h-3.5" />
+                                   </a>
+                                     <a
+                                       href={`/api/history/${job.id}/file?action=download`}
+                                       className="p-1.5 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 rounded transition-colors inline-flex items-center gap-1"
+                                       title="T\u1ea3i file v\u1ec1"
+                                   >
+                                       <Archive className="w-3.5 h-3.5" />
+                                   </a>
+                                   </>
+                                 )}
+                                 <button
+                                   onClick={() => handleReprint(job.id)}
+                                   disabled={loading || job.status === 'PROCESSING'}
+                                   className="p-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 rounded transition-colors disabled:opacity-50 inline-flex items-center gap-1"
+                                   title="In l\u1ea1i file n\u00e0y"
+                               >
+                                   <Repeat className="w-3.5 h-3.5" />
+                               </button>
+                             </div>
+                             </td>
                             </tr>
                           );
                         }
