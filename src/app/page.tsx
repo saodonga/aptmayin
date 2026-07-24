@@ -99,6 +99,10 @@ export default function DashboardPage() {
   // Application data states
   const [printers, setPrinters] = useState<PrinterConfig[]>([]);
   const [history, setHistory] = useState<PrintJob[]>([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyPage, setHistoryPage] = useState(1);
+  const [historyTotalPages, setHistoryTotalPages] = useState(1);
+  const [historyShowAll, setHistoryShowAll] = useState(false);
   const [historySearchQuery, setHistorySearchQuery] = useState('');
   const [expandedBatches, setExpandedBatches] = useState<Record<string, boolean>>({});
   const [users, setUsers] = useState<UserConfig[]>([]);
@@ -186,7 +190,7 @@ export default function DashboardPage() {
 
 
   // Fetch all initial data
-  const fetchData = async () => {
+  const fetchData = async (page = 1, showAll = false) => {
     try {
       setRefreshing(true);
       // Fetch printers list
@@ -199,17 +203,17 @@ export default function DashboardPage() {
         }
       }
 
-      // Fetch history log
-      const resHistory = await fetch('/api/history');
+      // Fetch history log (paginated)
+      const historyUrl = showAll
+        ? '/api/history?all=true'
+        : `/api/history?page=${page}&limit=50`;
+      const resHistory = await fetch(historyUrl);
       if (resHistory.ok) {
         const data = await resHistory.json();
-        setHistory(data);
-      }
-
-      // Fetch current user details (to refresh quota details)
-      if (session?.user?.id) {
-        const resUser = await fetch('/api/history'); // Use logs endpoint to get user info or custom endpoint
-        // Let's deduce user quota from the history logs or from users list
+        setHistory(data.jobs ?? data);
+        setHistoryTotal(data.total ?? (data.jobs ?? data).length);
+        setHistoryTotalPages(data.totalPages ?? 1);
+        setHistoryPage(data.page ?? page);
       }
       
       setRefreshing(false);
@@ -245,7 +249,7 @@ export default function DashboardPage() {
     if (status === 'unauthenticated') {
       router.push('/login');
     } else if (status === 'authenticated') {
-      fetchData();
+      fetchData(1, false);
       if (session.user.role === 'ADMIN') {
         fetchUsers();
       }
@@ -780,14 +784,39 @@ export default function DashboardPage() {
 
   // Action Admin: Reset All Quotas
   const handleResetQuotas = async () => {
-    const confirmReset = confirm('Bạn có chắc chắn muốn đưa số trang ĐÃ IN của TẤT CẢ người dùng về 0 không? Hành động này không thể hoàn tác! (Thường được sử dụng vào đầu tháng)');
+    const confirmReset = confirm('Bạn có chắc chắn muốn đưa số trang ĐÃ IN của TẤT CẢ người dùng về 0 không? Lịch sử quota sẽ được lưu trước khi reset. (Thường dùng đầu tháng)');
     if (!confirmReset) return;
 
     try {
-      const res = await fetch('/api/admin/users/reset-quota', { method: 'POST' });
+      const res = await fetch('/api/admin/quota/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ all: true }),
+      });
       if (res.ok) {
         const data = await res.json();
         alert(data.message || 'Reset thành công!');
+        fetchUsers();
+      } else {
+        const d = await res.json();
+        alert(`Lỗi: ${d.error}`);
+      }
+    } catch (e) {
+      alert('Lỗi kết nối!');
+    }
+  };
+
+  // Action Admin: Reset quota một user
+  const handleResetUserQuota = async (userId: string, userName: string) => {
+    if (!confirm(`Reset quota của ${userName}? Lịch sử tháng này sẽ được lưu lại.`)) return;
+    try {
+      const res = await fetch('/api/admin/quota/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      });
+      if (res.ok) {
+        alert('Reset quota thành công!');
         fetchUsers();
       } else {
         const d = await res.json();
@@ -983,7 +1012,7 @@ export default function DashboardPage() {
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={fetchData}
+              onClick={() => fetchData(historyPage, historyShowAll)}
               disabled={refreshing}
               className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg border border-slate-800 transition-colors flex items-center gap-1.5 text-xs"
             >
@@ -1249,22 +1278,41 @@ export default function DashboardPage() {
           {activeTab === 'history' && (
             <div className="max-w-6xl mx-auto bg-slate-900 rounded-2xl border border-slate-800 shadow-xl overflow-hidden">
               <div className="p-4 sm:p-6 border-b border-slate-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                  <History className="h-5 w-5 text-indigo-400" />
-                  Lịch sử in ấn
-                </h2>
-                {history.length > 0 && (
-                  <div className="relative w-full sm:w-auto">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
-                    <input
-                      type="text"
-                      placeholder="Tìm kiếm tên file..."
-                      value={historySearchQuery}
-                      onChange={(e) => setHistorySearchQuery(e.target.value)}
-                      className="w-full sm:w-64 pl-9 pr-4 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
-                    />
-                  </div>
-                )}
+                <div>
+                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                    <History className="h-5 w-5 text-indigo-400" />
+                    Lịch sử in ấn
+                    {historyTotal > 0 && (
+                      <span className="text-sm font-normal text-slate-400 ml-1">({historyTotal} lần in)</span>
+                    )}
+                  </h2>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {history.length > 0 && (
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Tìm kiếm tên file..."
+                        value={historySearchQuery}
+                        onChange={(e) => setHistorySearchQuery(e.target.value)}
+                        className="w-full sm:w-56 pl-9 pr-4 py-2 bg-slate-950 border border-slate-700 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
+                      />
+                    </div>
+                  )}
+                  {session?.user?.role === 'ADMIN' && (
+                    <button
+                      onClick={() => { const next = !historyShowAll; setHistoryShowAll(next); fetchData(1, next); }}
+                      className={`px-3 py-2 text-xs rounded-lg border font-semibold transition-all ${
+                        historyShowAll
+                          ? 'bg-indigo-600/30 border-indigo-500/50 text-indigo-300'
+                          : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {historyShowAll ? `Hiện tất cả (${historyTotal})` : 'Hiện tất cả'}
+                    </button>
+                  )}
+                </div>
               </div>
               
               {history.length === 0 ? (
@@ -1472,6 +1520,51 @@ export default function DashboardPage() {
                       })}
                     </tbody>
                   </table>
+                </div>
+              )}
+              {/* Pagination controls */}
+              {!historyShowAll && historyTotalPages > 1 && (
+                <div className="p-4 border-t border-slate-800 flex items-center justify-between gap-4">
+                  <span className="text-xs text-slate-400">
+                    Trang {historyPage}/{historyTotalPages} &middot; {historyTotal} lần in
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => { const p = historyPage - 1; setHistoryPage(p); fetchData(p, false); }}
+                      disabled={historyPage <= 1 || refreshing}
+                      className="px-3 py-1.5 text-xs rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white disabled:opacity-40 transition-all"
+                    >
+                      ← Trước
+                    </button>
+                    {Array.from({ length: Math.min(historyTotalPages, 7) }, (_, i) => {
+                      const pg = historyTotalPages <= 7 ? i + 1 : (() => {
+                        if (historyPage <= 4) return i + 1;
+                        if (historyPage >= historyTotalPages - 3) return historyTotalPages - 6 + i;
+                        return historyPage - 3 + i;
+                      })();
+                      return (
+                        <button
+                          key={pg}
+                          onClick={() => { setHistoryPage(pg); fetchData(pg, false); }}
+                          disabled={refreshing}
+                          className={`w-8 h-8 text-xs rounded-lg border transition-all ${
+                            pg === historyPage
+                              ? 'bg-indigo-600 border-indigo-500 text-white font-bold'
+                              : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {pg}
+                        </button>
+                      );
+                    })}
+                    <button
+                      onClick={() => { const p = historyPage + 1; setHistoryPage(p); fetchData(p, false); }}
+                      disabled={historyPage >= historyTotalPages || refreshing}
+                      className="px-3 py-1.5 text-xs rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white disabled:opacity-40 transition-all"
+                    >
+                      Sau →
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

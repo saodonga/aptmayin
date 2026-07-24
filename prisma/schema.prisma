@@ -21,18 +21,23 @@ enum JobStatus {
 }
 
 model User {
-  id            String     @id @default(cuid())
-  name          String?
-  email         String     @unique
-  emailVerified DateTime?
-  image         String?
-  role          Role       @default(USER)
-  pageQuota     Int        @default(100) // Hạn mức trang in mỗi tháng
-  pagesPrinted  Int        @default(0)   // Số trang đã in trong tháng
-  printJobs     PrintJob[]
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  id                String         @id @default(cuid())
+  name              String?
+  email             String         @unique
+  emailVerified     DateTime?
+  image             String?
+  role              Role           @default(USER)
+  pageQuota         Int            @default(100) // Hạn mức trang in mỗi tháng
+  pagesPrinted      Int            @default(0)   // Số trang đã in TRONG THÁNG (reset hàng tháng)
+  totalPagesPrinted Int            @default(0)   // Tổng số trang đã in MỌI THỜI ĐIỂM
+  quotaResetAt      DateTime?                    // Thời điểm reset quota gần nhất
+  skipNextReset     Boolean        @default(false) // Admin flag: bỏ qua auto-reset tháng tới
+  printJobs         PrintJob[]
+  quotaHistories    QuotaHistory[]
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
 }
+
 
 model Printer {
   id          String     @id @default(cuid())
@@ -48,24 +53,40 @@ model Printer {
 }
 
 model PrintJob {
-  id          String     @id @default(cuid())
-  userId      String
-  user        User       @relation(fields: [userId], references: [id])
-  printerId   String
-  printer     Printer    @relation(fields: [printerId], references: [id])
-  fileName    String
-  fileSize    Int        // bytes
-  pageCount   Int        // Số trang của file gốc
-  copies      Int        @default(1)
-  totalPages  Int        // pageCount * copies
-  paperSize   String     @default("A4") // A4, A3, etc.
-  duplex      Boolean    @default(true) // true = in 2 mặt, false = 1 mặt
-  colorMode   String     @default("GRAY") // GRAY, COLOR
-  status      JobStatus  @default(PENDING)
-  errorLog    String?    // Chi tiết lỗi nếu thất bại
-  savedFilePath String?  // File đính kèm để in lại
-  batchId     String?    // ID nhóm để gộp các file in từ chung một file ZIP
-  batchName   String?    // Tên file ZIP gốc
-  pageRange   String?    // Khoảng trang in, ví dụ: "1-5"
-  createdAt   DateTime   @default(now())
+  id            String     @id @default(cuid())
+  userId        String
+  user          User       @relation(fields: [userId], references: [id])
+  printerId     String
+  printer       Printer    @relation(fields: [printerId], references: [id])
+  fileName      String
+  fileSize      Int        // bytes
+  pageCount     Int        // Số trang của file gốc
+  copies        Int        @default(1)
+  totalPages    Int        // pageCount * copies
+  paperSize     String     @default("A4") // A4, A3, etc.
+  duplex        Boolean    @default(true) // true = in 2 mặt, false = 1 mặt
+  colorMode     String     @default("GRAY") // GRAY, COLOR
+  status        JobStatus  @default(PENDING)
+  errorLog      String?    // Chi tiết lỗi nếu thất bại
+  savedFilePath String?    // File đính kèm để in lại
+  batchId       String?    // ID nhóm để gộp các file in từ chung một file ZIP
+  batchName     String?    // Tên file ZIP gốc
+  pageRange     String?    // Khoảng trang in, ví dụ: "1-5"
+  createdAt     DateTime   @default(now())
+}
+
+// Lịch sử quota của mỗi user theo tháng/năm
+// Được tạo tự động khi quota reset (hàng tháng) hoặc admin reset thủ công
+model QuotaHistory {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  year         Int      // Năm, ví dụ: 2026
+  month        Int      // Tháng 1-12
+  pagesPrinted Int      // Số trang đã in trong tháng đó
+  quota        Int      // Hạn mức được cấp tháng đó
+  resetAt      DateTime @default(now()) // Thời điểm lưu record này
+
+  @@unique([userId, year, month])
+  @@index([userId, year])
 }

@@ -9,6 +9,7 @@ import fs from 'fs';
 import path from 'path';
 import AdmZip from 'adm-zip';
 import { v4 as uuidv4 } from 'uuid';
+import { checkAndResetQuota } from '@/lib/quota';
 
 export const dynamic = 'force-dynamic';
 
@@ -79,9 +80,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Không tìm thấy máy in được chọn!' }, { status: 404 });
     }
 
-    const user = await db.user.findUnique({
-      where: { id: session.user.id },
-    });
+    // Lấy user và auto-reset quota nếu sang tháng mới
+    const user = await checkAndResetQuota(session.user.id).catch(() =>
+      db.user.findUnique({ where: { id: session.user.id } })
+    );
 
     if (!user) {
       return NextResponse.json({ error: 'Không tìm thấy thông tin người dùng!' }, { status: 404 });
@@ -167,10 +169,11 @@ async function processZipInBackground(zipBuffer: Buffer, zipName: string, config
 
       console.log(`[ZIP Process] Đang in file ${i + 1}/${validEntries.length}: ${entry.name}`);
       
-      const userRefresh = await db.user.findUnique({ where: { id: config.user.id } });
+      // Auto-reset quota nếu sang tháng mới, lấy user mới nhất
+      const userRefresh = await checkAndResetQuota(config.user.id).catch(() =>
+        db.user.findUnique({ where: { id: config.user.id } })
+      );
       if (!userRefresh) break; // User bị xóa giữa chừng
-      
-      // Update config user to latest quota stats
       config.user = userRefresh;
 
       await processAndPrintSingleFile(fileBuffer, entry.name, mimeType, config);
@@ -308,7 +311,13 @@ async function processAndPrintSingleFile(
   if (mockMode) {
     await new Promise((resolve) => setTimeout(resolve, 1500));
     await db.printJob.update({ where: { id: job.id }, data: { status: JobStatus.SUCCESS } });
-    await db.user.update({ where: { id: user.id }, data: { pagesPrinted: { increment: totalPages } } });
+    await db.user.update({
+      where: { id: user.id },
+      data: {
+        pagesPrinted:      { increment: totalPages },
+        totalPagesPrinted: { increment: totalPages },
+      },
+    });
     return { success: true, jobId: job.id, mock: true };
   }
 
@@ -355,7 +364,13 @@ async function processAndPrintSingleFile(
 
   if (printResult.success) {
     await db.printJob.update({ where: { id: job.id }, data: { status: JobStatus.SUCCESS } });
-    await db.user.update({ where: { id: user.id }, data: { pagesPrinted: { increment: totalPages } } });
+    await db.user.update({
+      where: { id: user.id },
+      data: {
+        pagesPrinted:      { increment: totalPages },
+        totalPagesPrinted: { increment: totalPages },
+      },
+    });
     return { success: true, jobId: job.id };
   } else {
     await db.printJob.update({
