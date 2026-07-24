@@ -6,12 +6,14 @@ import PWARegister from '@/components/PWARegister';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
-  subsets: ['latin'],
+  // 'vietnamese' bắt buộc để preload đầy đủ glyph có dấu tiếng Việt
+  // (ă, ắ, ề, ợ, ữ...). Không có subset này browser sẽ fallback về Arial.
+  subsets: ['latin', 'vietnamese'],
 });
 
 const geistMono = Geist_Mono({
   variable: '--font-geist-mono',
-  subsets: ['latin'],
+  subsets: ['latin', 'vietnamese'],
 });
 
 export const viewport: Viewport = {

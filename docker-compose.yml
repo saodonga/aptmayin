@@ -27,9 +27,23 @@ services:
     restart: always
     ports:
       - "3000:3000"
+    # Cài font Noto hỗ trợ tiếng Việt (UTF-8) vào container trước khi start
+    # Gotenberg dùng Chromium (HTML→PDF) và LibreOffice (Office→PDF);
+    # nếu thiếu font, ký tự có dấu Việt sẽ ra hình vuông trong file PDF.
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - "gotenberg"
-      - "--api-port=3000"
+      - |
+        apt-get update -qq && \
+        apt-get install -y --no-install-recommends \
+          fonts-noto \
+          fonts-noto-cjk \
+          fonts-noto-extra \
+          fonts-open-sans \
+        && fc-cache -f \
+        && gotenberg \
+          --api-port=3000 \
+          --chromium-disable-javascript=false \
+          --chromium-allow-list='.*'
 
   # 2. CUPS Print Server (Đầu não kết nối máy in USB và máy in mạng)
   cups-server:

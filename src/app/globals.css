@@ -22,5 +22,20 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /*
+   * Font stack ưu tiên Unicode / UTF-8 Việt Nam:
+   * 1. Geist Sans (Google Fonts, đã load subset Vietnamese ở layout.tsx)
+   * 2. system-ui  → dùng font hệ thống, thường hỗ trợ tốt Unicode
+   * 3. Segoe UI   → Windows (hỗ trợ đầy đủ tiếng Việt)
+   * 4. Noto Sans  → Cross-platform, thiết kế cho Unicode đa ngôn ngữ
+   * 5. Arial      → fallback cuối (có glyph Việt trên hầu hết OS)
+   * 6. sans-serif → fallback hệ thống
+   */
+  font-family:
+    var(--font-geist-sans),
+    system-ui,
+    'Segoe UI',
+    'Noto Sans',
+    Arial,
+    sans-serif;
 }
