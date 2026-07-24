@@ -54,6 +54,7 @@ interface PrintJob {
   status: string;
   errorLog?: string;
   savedFilePath?: string;
+  hasFile?: boolean;        // Server-computed: savedFilePath exists on disk
   batchId?: string;
   batchName?: string;
   createdAt: string;
@@ -107,6 +108,19 @@ export default function DashboardPage() {
   const [expandedBatches, setExpandedBatches] = useState<Record<string, boolean>>({});
   const [users, setUsers] = useState<UserConfig[]>([]);
   const [userData, setUserData] = useState<{ pagesPrinted: number; pageQuota: number } | null>(null);
+
+  // Analytics states
+  const [analyticsData, setAnalyticsData] = useState<{
+    summary: { totalJobs: number; totalPages: number; failedJobs: number; duplexRate: number; colorRate: number; avgPagesPerJob: number };
+    byUser: { userId: string; name: string; email: string; jobCount: number; pageCount: number; failCount: number }[];
+    byPrinter: { printerId: string; displayName: string; jobCount: number; pageCount: number }[];
+    byDay: { date: string; pages: number }[];
+    byMonth: { month: string; pages: number }[];
+  } | null>(null);
+  const [analyticsFrom, setAnalyticsFrom] = useState('');
+  const [analyticsTo, setAnalyticsTo] = useState('');
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsChartMode, setAnalyticsChartMode] = useState<'day' | 'month'>('month');
 
   // Print Form States
   const [selectedPrinter, setSelectedPrinter] = useState<string>('');
@@ -832,6 +846,48 @@ export default function DashboardPage() {
   const quotaLimit = userData?.pageQuota ?? 100;
   const quotaPercent = Math.min(Math.round((quotaUsed / quotaLimit) * 100), 100);
 
+  // Analytics fetch
+  const fetchAnalytics = async (from = analyticsFrom, to = analyticsTo) => {
+    setAnalyticsLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (from) params.set('from', from);
+      if (to)   params.set('to', to);
+      const res = await fetch(`/api/analytics?${params}`);
+      if (res.ok) setAnalyticsData(await res.json());
+    } catch (e) {
+      console.error('Analytics fetch error:', e);
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
+
+  // Auto-load analytics khi chuyển tab
+  React.useEffect(() => {
+    if (activeTab === 'analytics') fetchAnalytics();
+  }, [activeTab]);
+
+  // Quick range helpers
+  const setQuickRange = (preset: 'all' | 'month' | 'year' | 'quarter') => {
+    const now = new Date();
+    let from = '', to = '';
+    const fmt = (d: Date) => d.toISOString().substring(0, 10);
+    if (preset === 'month') {
+      from = fmt(new Date(now.getFullYear(), now.getMonth(), 1));
+      to   = fmt(now);
+    } else if (preset === 'quarter') {
+      const q = Math.floor(now.getMonth() / 3);
+      from = fmt(new Date(now.getFullYear(), q * 3, 1));
+      to   = fmt(now);
+    } else if (preset === 'year') {
+      from = `${now.getFullYear()}-01-01`;
+      to   = fmt(now);
+    }
+    setAnalyticsFrom(from);
+    setAnalyticsTo(to);
+    fetchAnalytics(from, to);
+  };
+
   const toggleBatch = (batchId: string) => {
     setExpandedBatches(prev => ({ ...prev, [batchId]: !prev[batchId] }));
   };
@@ -1441,16 +1497,38 @@ export default function DashboardPage() {
                                   <td className="p-4 text-xs text-right text-slate-500">
                                     {new Date(job.createdAt).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
                                   </td>
-                                  <td className="p-4 text-xs text-right">
-                                    <button
-                                      onClick={() => handleReprint(job.id)}
-                                      disabled={loading || job.status === 'PROCESSING'}
-                                      className="p-1.5 bg-indigo-500/5 hover:bg-indigo-500/10 text-indigo-400/70 rounded transition-colors disabled:opacity-50 inline-flex items-center gap-1"
-                                      title="In lại file này"
-                                    >
-                                      <Repeat className="w-3 h-3" />
-                                    </button>
-                                  </td>
+                                   <td className="p-4 text-xs text-right">
+                                     <div className="flex items-center justify-end gap-1.5">
+                                       {job.hasFile && (
+                                         <>
+                                           <a
+                                             href={`/api/history/${job.id}/file?action=view`}
+                                             target="_blank"
+                                             rel="noopener noreferrer"
+                                             className="p-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded transition-colors inline-flex items-center"
+                                             title="Xem file PDF"
+                                         >
+                                             <FileText className="w-3 h-3" />
+                                         </a>
+                                           <a
+                                             href={`/api/history/${job.id}/file?action=download`}
+                                             className="p-1.5 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 rounded transition-colors inline-flex items-center"
+                                             title="Tải file về"
+                                         >
+                                             <Archive className="w-3 h-3" />
+                                         </a>
+                                         </>
+                                       )}
+                                       <button
+                                         onClick={() => handleReprint(job.id)}
+                                         disabled={loading || job.status === 'PROCESSING'}
+                                         className="p-1.5 bg-indigo-500/5 hover:bg-indigo-500/10 text-indigo-400/70 rounded transition-colors disabled:opacity-50 inline-flex items-center"
+                                         title="In lại file này"
+                                     >
+                                         <Repeat className="w-3 h-3" />
+                                     </button>
+                                   </div>
+                                   </td>
                                 </tr>
                               ))}
                             </React.Fragment>
@@ -1573,103 +1651,197 @@ export default function DashboardPage() {
           {/* TAB 3: ANALYTICS */}
           {activeTab === 'analytics' && (
             <div className="max-w-6xl mx-auto space-y-6">
-              {/* Analytics metrics summary cards */}
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-md">
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Tổng số Job in</span>
-                  <div className="text-3xl font-extrabold text-white mt-2">{history.length}</div>
+
+              {/* Date Range Filter */}
+              <div className="bg-slate-900 rounded-2xl border border-slate-800 p-5 flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+                <div className="flex flex-wrap gap-2">
+                  {([
+                    { label: 'Tất cả', preset: 'all' },
+                    { label: 'Tháng này', preset: 'month' },
+                    { label: 'Quý này', preset: 'quarter' },
+                    { label: 'Năm nay', preset: 'year' },
+                  ] as const).map(({ label, preset }) => (
+                    <button
+                      key={preset}
+                      onClick={() => setQuickRange(preset)}
+                      className={`px-3 py-1.5 text-xs rounded-lg border font-semibold transition-all ${
+                        (preset === 'all' && !analyticsFrom && !analyticsTo) ? 'bg-indigo-600/30 border-indigo-500/50 text-indigo-200 font-bold' :
+                        'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
+                      }}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
-                <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-md">
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Tổng số trang đã in</span>
-                  <div className="text-3xl font-extrabold text-indigo-400 mt-2">
-                    {history.filter(h => h.status === 'SUCCESS').reduce((acc, curr) => acc + curr.totalPages, 0)}
-                  </div>
-                </div>
-                <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-md">
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Tỷ lệ in 2 mặt (Eco)</span>
-                  <div className="text-3xl font-extrabold text-emerald-400 mt-2">
-                    {(() => {
-                      const successJobs = history.filter(h => h.status === 'SUCCESS');
-                      if (successJobs.length === 0) return '0%';
-                      const duplexCount = successJobs.filter(h => h.duplex).length;
-                      return `${Math.round((duplexCount / successJobs.length) * 100)}%`;
-                    })()}
-                  </div>
-                </div>
-                <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-md">
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Job thất bại (Fail)</span>
-                  <div className="text-3xl font-extrabold text-rose-500 mt-2">
-                    {history.filter(h => h.status === 'FAILED').length}
-                  </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <input type="date" value={analyticsFrom} onChange={e => setAnalyticsFrom(e.target.value)}
+                    className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500" />
+                  <span className="text-slate-500 text-xs">→</span>
+                  <input type="date" value={analyticsTo} onChange={e => setAnalyticsTo(e.target.value)}
+                    className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500" />
+                  <button onClick={() => fetchAnalytics(analyticsFrom, analyticsTo)} disabled={analyticsLoading}
+                    className="px-4 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-semibold transition-all disabled:opacity-50">
+                    {analyticsLoading ? 'Đang tải...' : 'Áp dụng'}
+                  </button>
                 </div>
               </div>
 
-              {/* Custom SVG Charts panel */}
+              {analyticsData && (
+              <>
+              {/* Summary Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                {[
+                  { label: 'Tổng lệnh in', value: analyticsData.summary.totalJobs, color: 'text-white' },
+                  { label: 'Tổng trang in', value: analyticsData.summary.totalPages, color: 'text-indigo-400' },
+                  { label: 'In thất bại', value: analyticsData.summary.failedJobs, color: 'text-rose-400' },
+                  { label: 'Tỷ lệ 2 mặt', value: `${analyticsData.summary.duplexRate}%`, color: 'text-emerald-400' },
+                  { label: 'In màu', value: `${analyticsData.summary.colorRate}%`, color: 'text-amber-400' },
+                  { label: 'TB trang/lệnh', value: analyticsData.summary.avgPagesPerJob, color: 'text-sky-400' },
+                ].map(({ label, value, color }) => (
+                  <div key={label} className="bg-slate-900 p-4 rounded-2xl border border-slate-800 shadow-md">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{label}</div>
+                    <div className={`text-2xl font-extrabold mt-1.5 ${color}`}>{value}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Charts Row */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {/* SVG Chart 1: Daily load (last 5 prints) */}
+                {/* Time Series Chart */}
                 <div className="md:col-span-2 bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl">
-                  <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-6">Tải lượng in ấn 7 lượt in gần đây</h3>
-                  <div className="relative h-64 flex items-end justify-between px-6 pt-10 border-b border-l border-slate-850">
-                    {/* SVG grid lines */}
-                    <div className="absolute inset-0 flex flex-col justify-between pointer-events-none pb-1 mt-10">
-                      <div className="border-t border-slate-800/40 w-full"></div>
-                      <div className="border-t border-slate-800/40 w-full"></div>
-                      <div className="border-t border-slate-800/40 w-full"></div>
+                  <div className="flex items-center justify-between mb-5">
+                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">Biểu đồ in ấn theo thời gian</h3>
+                    <div className="flex gap-1.5">
+                      {([
+                        { mode: 'month' as const, label: 'Tháng' },
+                        { mode: 'day' as const, label: 'Ngày' },
+                      ]).map(({ mode, label }) => (
+                        <button key={mode} onClick={() => setAnalyticsChartMode(mode)}
+                          className={`px-2.5 py-1 text-[10px] rounded-lg border font-bold transition-all ${
+                            analyticsChartMode === mode
+                              ? 'bg-indigo-600 border-indigo-500 text-white'
+                              : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
+                          }}`}>
+                          {label}
+                        </button>
+                      ))}
                     </div>
-
-                    {history.slice(0, 7).reverse().map((job, idx) => {
-                      const maxVal = Math.max(...history.slice(0, 7).map(j => j.totalPages), 10);
-                      const heightPercent = Math.round((job.totalPages / maxVal) * 80) + 10;
-                      return (
-                        <div key={job.id} className="relative group flex flex-col items-center flex-1 mx-2 h-full justify-end">
-                          {/* Tooltip */}
-                          <div className="absolute bottom-full mb-2 bg-indigo-600 text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                            {job.totalPages} trang
-                          </div>
-                          {/* SVG Bar */}
-                          <div 
-                            className="w-8 bg-indigo-500/80 hover:bg-indigo-400 rounded-t-lg transition-all duration-500 flex items-center justify-center font-bold text-[10px] text-white/80"
-                            style={{ height: `${heightPercent}%` }}
-                          >
-                            {job.totalPages}
-                          </div>
-                          {/* Label */}
-                          <span className="text-[10px] text-slate-400 truncate max-w-[60px] mt-2 select-none" title={job.fileName}>
-                            {job.fileName.substring(0, 8)}..
-                          </span>
-                        </div>
-                      );
-                    })}
                   </div>
+                  {(() => {
+                    const data = analyticsChartMode === 'month' ? analyticsData.byMonth.map(d => ({ label: d.month, pages: d.pages })) : analyticsData.byDay.slice(-30).map(d => ({ label: d.date.substring(5), pages: d.pages }));
+                    if (data.length === 0) return <div className="h-48 flex items-center justify-center text-slate-500 text-sm">Không có dữ liệu trong khoảng thời gian này</div>;
+                    const maxVal = Math.max(...data.map(d => d.pages), 1);
+                    return (
+                      <div className="relative h-52 flex items-end gap-1 border-b border-l border-slate-800 px-2">
+                        <div className="absolute inset-0 flex flex-col justify-between pointer-events-none">
+                          {[...Array(4)].map((_, i) => (
+                            <div key={i} className="border-t border-slate-800/40 w-full relative">
+                              <span className="absolute -top-2.5 -left-8 text-[9px] text-slate-500">{Math.round(maxVal * (3 - i) / 3)}</span>
+                            </div>
+                          ))}
+                          <div />
+                        </div>
+                        {data.map((d, i) => {
+                          const h = Math.max(Math.round((d.pages / maxVal) * 100), 2);
+                          return (
+                            <div key={i} className="flex-1 flex flex-col items-center group relative">
+                              <div className="absolute -top-6 left-1/2 -translate-x-1/2 bg-indigo-700 text-white text-[9px] px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity z-10 whitespace-nowrap">{d.pages} trang</div>
+                              <div className="w-full min-w-[4px] bg-indigo-500/70 hover:bg-indigo-400 rounded-t transition-all duration-300 cursor-pointer" style={{ height: `${h}%` }} />
+                              {data.length <= 18 && <span className="text-[8px] text-slate-500 mt-1 truncate max-w-full">{d.label}</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                 </div>
 
-                {/* SVG Chart 2: Printer Usage Distribution */}
-                <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl space-y-6">
-                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">Phân bổ in ấn theo máy</h3>
-                  <div className="space-y-4">
-                    {printers.map((p) => {
-                      const count = history.filter(h => h.printerId === p.id && h.status === 'SUCCESS').reduce((acc, curr) => acc + curr.totalPages, 0);
-                      const totalAll = history.filter(h => h.status === 'SUCCESS').reduce((acc, curr) => acc + curr.totalPages, 0) || 1;
-                      const percent = Math.round((count / totalAll) * 100);
-
-                      return (
-                        <div key={p.id} className="space-y-1.5">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="font-semibold text-slate-300">{p.displayName}</span>
-                            <span className="text-slate-400 font-semibold">{count} trang ({percent}%)</span>
+                {/* Printer Distribution */}
+                <div className="bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-xl space-y-4">
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider">Phân bổ theo máy in</h3>
+                  {analyticsData.byPrinter.length === 0 ? (
+                    <div className="text-slate-500 text-sm text-center py-8">Không có dữ liệu</div>
+                  ) : (
+                    <div className="space-y-4">
+                      {analyticsData.byPrinter.map((p, i) => {
+                        const total = analyticsData.byPrinter.reduce((s, x) => s + x.pageCount, 0) || 1;
+                        const pct = Math.round((p.pageCount / total) * 100);
+                        const colors = ['bg-indigo-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-sky-500'];
+                        return (
+                          <div key={p.printerId} className="space-y-1.5">
+                            <div className="flex justify-between text-xs">
+                              <span className="font-semibold text-slate-300 truncate max-w-[60%]">{p.displayName}</span>
+                              <span className="text-slate-400 font-mono">{p.pageCount.toLocaleString()} ({pct}%)</span>
+                            </div>
+                            <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden">
+                              <div className={`${colors[i % colors.length]} h-full rounded-full transition-all duration-700`} style={{ width: `${pct}%` }} />
+                            </div>
                           </div>
-                          <div className="w-full bg-slate-950 h-2.5 rounded-full overflow-hidden border border-slate-800/40">
-                            <div 
-                              className="bg-indigo-500 h-full rounded-full transition-all duration-500" 
-                              style={{ width: `${percent}%` }}
-                            ></div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
+
+              {/* User Ranking Table (Admin only) */}
+              {session?.user?.role === 'ADMIN' && analyticsData.byUser.length > 0 && (
+                <div className="bg-slate-900 rounded-2xl border border-slate-800 shadow-xl overflow-hidden">
+                  <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-white uppercase tracking-wider">Thống kê theo người dùng</h3>
+                    <span className="text-xs text-slate-400">{analyticsData.byUser.length} người dùng</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="border-b border-slate-800 bg-slate-950/50">
+                          <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">#</th>
+                          <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Người dùng</th>
+                          <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Lệnh in</th>
+                          <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Tổng trang</th>
+                          <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Thất bại</th>
+                          <th className="p-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Tỷ trọng</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60">
+                        {analyticsData.byUser.map((u, idx) => {
+                          const maxPages = analyticsData.byUser[0]?.pageCount || 1;
+                          const pct = Math.round((u.pageCount / maxPages) * 100);
+                          return (
+                            <tr key={u.userId} className="hover:bg-slate-800/30 transition-colors">
+                              <td className="p-4 text-xs text-slate-500 font-mono font-bold">#{idx + 1}</td>
+                              <td className="p-4">
+                                <div className="text-xs font-semibold text-white">{u.name}</div>
+                                <div className="text-[10px] text-slate-400">{u.email}</div>
+                              </td>
+                              <td className="p-4 text-xs text-right text-slate-300 font-mono">{u.jobCount}</td>
+                              <td className="p-4 text-xs text-right font-bold text-indigo-300 font-mono">{u.pageCount.toLocaleString()}</td>
+                              <td className="p-4 text-xs text-right font-mono">{u.failCount > 0 ? <span className="text-rose-400">{u.failCount}</span> : <span className="text-slate-600">0</span>}</td>
+                              <td className="p-4 min-w-[120px]">
+                                <div className="flex items-center gap-2">
+                                  <div className="flex-1 bg-slate-950 h-1.5 rounded-full overflow-hidden">
+                                    <div className="bg-indigo-500 h-full rounded-full transition-all duration-700" style={{ width: `${pct}%` }} />
+                                  </div>
+                                  <span className="text-[10px] text-slate-400 w-8 text-right">{pct}%</span>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+              </>
+              )}
+
+              {!analyticsData && !analyticsLoading && (
+                <div className="text-center py-20 text-slate-500 text-sm">Đang tải dữ liệu thống kê...</div>
+              )}
+              {analyticsLoading && (
+                <div className="text-center py-20"><div className="animate-spin h-8 w-8 border-t-2 border-indigo-500 rounded-full mx-auto" /></div>
+              )}
             </div>
           )}
 
