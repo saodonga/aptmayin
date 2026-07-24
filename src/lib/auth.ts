@@ -130,12 +130,14 @@ export const authOptions: AuthOptions = {
             pageQuota: 100, // Default pages per month
           },
         });
-        return true;
       } catch (error) {
-        console.error('Error in JIT user provisioning:', error);
-        return false;
+        // DB lỗi tạm thời KHÔNG nên block login — Google đã xác thực thành công.
+        // User vẫn có JWT hợp lệ. Log lỗi để debug, nhưng cho phép login tiếp.
+        console.error('[Auth] DB upsert failed (non-blocking):', error);
       }
+      return true; // Luôn cho phép login sau khi Google xác thực thành công
     },
+
     async jwt({ token, user }) {
       if (user) {
         const dbUser = await db.user.findUnique({
