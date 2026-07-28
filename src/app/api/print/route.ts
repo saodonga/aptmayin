@@ -276,10 +276,10 @@ async function processAndPrintSingleFile(
   // Tạm sinh jobId trước để dùng làm tiền tố lưu file
   const jobId = uuidv4();
   
-  // 5. Lưu trữ file vật lý (fileBuffer lúc này là PDF hoàn thiện, hoặc file gốc nếu đã là PDF)
+  // 5. Lưu trữ file vật lý (luôn lưu file GỐC để user tải về đúng định dạng)
   let savedFilePath = null;
   try {
-    savedFilePath = saveFileToDisk(fileBuffer, fileName, jobId);
+    savedFilePath = saveFileToDisk(originalBuffer, fileName, jobId);
   } catch (e) {
     console.error(`[API Print] Không thể lưu file đính kèm:`, e);
   }
